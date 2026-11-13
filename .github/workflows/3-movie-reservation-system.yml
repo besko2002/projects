@@ -1,15 +1,25 @@
-name: CI
+name: 3-movie-reservation-system
 
 on:
   push:
     branches: [main]
+    paths:
+      - '3-movie-reservation-system/**'
+      - '.github/workflows/3-movie-reservation-system.yml'
   pull_request:
+    paths:
+      - '3-movie-reservation-system/**'
+      - '.github/workflows/3-movie-reservation-system.yml'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    defaults:
+      run:
+        working-directory: 3-movie-reservation-system
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -18,6 +28,7 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+          cache-dependency-path: '3-movie-reservation-system/**/pom.xml'
 
       # Testcontainers starts PostgreSQL through the Docker daemon on the runner.
       - name: Build and run tests

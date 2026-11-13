@@ -1,14 +1,24 @@
-name: CI
+name: 2-order-processing-microservices
 
 on:
   push:
     branches: [main]
+    paths:
+      - '2-order-processing-microservices/**'
+      - '.github/workflows/2-order-processing-microservices.yml'
   pull_request:
+    paths:
+      - '2-order-processing-microservices/**'
+      - '.github/workflows/2-order-processing-microservices.yml'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: 2-order-processing-microservices
     steps:
       - uses: actions/checkout@v4
 
@@ -17,6 +27,7 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+          cache-dependency-path: '2-order-processing-microservices/**/pom.xml'
 
       # Testcontainers starts PostgreSQL, Kafka and Redis through the runner's Docker daemon.
       - name: Build and run all tests
