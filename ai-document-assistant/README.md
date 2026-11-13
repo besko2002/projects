@@ -1,6 +1,6 @@
 # AI Document Assistant
 
-[![CI](https://github.com/besko2002/projects/actions/workflows/5-ai-document-assistant.yml/badge.svg)](https://github.com/besko2002/projects/actions/workflows/5-ai-document-assistant.yml)
+[![CI](https://github.com/besko2002/projects/actions/workflows/ai-document-assistant.yml/badge.svg)](https://github.com/besko2002/projects/actions/workflows/ai-document-assistant.yml)
 
 Upload a PDF and ask questions about it in a chat. Answers are **grounded in your document** (Retrieval-Augmented Generation) and **cite the pages** they came from. If the document does not contain the answer, the assistant says so instead of inventing one.
 

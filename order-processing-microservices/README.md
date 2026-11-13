@@ -1,6 +1,6 @@
 # Order Processing Microservices
 
-[![CI](https://github.com/besko2002/projects/actions/workflows/2-order-processing-microservices.yml/badge.svg)](https://github.com/besko2002/projects/actions/workflows/2-order-processing-microservices.yml)
+[![CI](https://github.com/besko2002/projects/actions/workflows/order-processing-microservices.yml/badge.svg)](https://github.com/besko2002/projects/actions/workflows/order-processing-microservices.yml)
 
 An event-driven e-commerce order flow built as **six Spring Boot microservices** that talk through
 **Kafka**. An order is placed, stock is reserved, payment is taken and the customer is notified —

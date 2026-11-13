@@ -1,15 +1,15 @@
-name: 5-ai-document-assistant
+name: ai-document-assistant
 
 on:
   push:
     branches: [main]
     paths:
-      - '5-ai-document-assistant/**'
-      - '.github/workflows/5-ai-document-assistant.yml'
+      - 'ai-document-assistant/**'
+      - '.github/workflows/ai-document-assistant.yml'
   pull_request:
     paths:
-      - '5-ai-document-assistant/**'
-      - '.github/workflows/5-ai-document-assistant.yml'
+      - 'ai-document-assistant/**'
+      - '.github/workflows/ai-document-assistant.yml'
   workflow_dispatch:
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: 5-ai-document-assistant
+        working-directory: ai-document-assistant
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -26,7 +26,7 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-          cache-dependency-path: '5-ai-document-assistant/**/pom.xml'
+          cache-dependency-path: 'ai-document-assistant/**/pom.xml'
       # Testcontainers starts a real PostgreSQL + pgvector through the runner's Docker daemon.
       # The AI providers are faked in the tests, so no API key is needed.
       - name: Build and test
@@ -37,14 +37,14 @@ jobs:
     timeout-minutes: 10
     defaults:
       run:
-        working-directory: 5-ai-document-assistant/frontend
+        working-directory: ai-document-assistant/frontend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: 5-ai-document-assistant/frontend/package-lock.json
+          cache-dependency-path: ai-document-assistant/frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
       - run: npm run test -- --run
