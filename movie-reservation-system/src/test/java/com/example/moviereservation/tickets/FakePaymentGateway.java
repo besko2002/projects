@@ -38,6 +38,7 @@ class FakePaymentGateway implements PaymentGateway {
     private final List<CheckoutSessionRequest> checkoutRequests = new ArrayList<>();
     private final List<RecordedRefund> refunds = new ArrayList<>();
     private final List<String> expiredSessions = new ArrayList<>();
+    private volatile boolean failRefunds = false;
 
     @Override
     public boolean isEnabled() {
@@ -74,8 +75,16 @@ class FakePaymentGateway implements PaymentGateway {
         return refund(paymentIntentId, amount, null);
     }
 
+    public void setFailRefunds(boolean failRefunds) {
+        this.failRefunds = failRefunds;
+    }
+
     @Override
     public synchronized RefundDto refund(String paymentIntentId, BigDecimal amount, String idempotencyKey) {
+        if (failRefunds) {
+            throw new com.example.moviereservation.common.ServiceUnavailableException(
+                    "The payment provider could not process the refund right now; please try again");
+        }
         refunds.add(new RecordedRefund(paymentIntentId, amount, idempotencyKey));
         return new RefundDto("re_test_fake_" + refunds.size(), paymentIntentId, amount, "succeeded");
     }
@@ -89,6 +98,7 @@ class FakePaymentGateway implements PaymentGateway {
     // --- test inspection ---------------------------------------------------------------------
 
     synchronized void reset() {
+        failRefunds = false;
         sessionsById.clear();
         checkoutRequests.clear();
         refunds.clear();

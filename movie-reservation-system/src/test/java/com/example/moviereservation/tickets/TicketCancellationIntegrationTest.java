@@ -159,6 +159,44 @@ class TicketCancellationIntegrationTest extends AbstractTicketIntegrationTest {
                 .andExpect(jsonPath("$.status").value(404));
     }
 
+    @Test
+    @DisplayName("a provider failure during refund leaves ticket PAID, and retry succeeds with stable idempotency key")
+    void refundRetriesStayConsistentWhenProviderFails() throws Exception {
+        Show show = fixtures.createShow(fixtures.adminToken());
+        TestUser user = fixtures.registerUser();
+        long ticketId = pendingTicket(user.token(), show.scheduleId(), List.of(show.seat(0)));
+        String paymentIntentId = payTicket(ticketId);
+        assertThat(ticketStatus(ticketId)).isEqualTo("PAID");
+
+        // Simulate provider failure (e.g. Stripe is temporarily unavailable)
+        paymentGateway.setFailRefunds(true);
+
+        cancel(user.token(), ticketId)
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.status").value(503))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("payment provider")));
+
+        // Transaction rolled back: ticket stays PAID, seats stay CONFIRMED, no refund recorded in DB
+        assertThat(ticketStatus(ticketId)).isEqualTo("PAID");
+        assertThat(reservationStatusesOfTicket(ticketId)).containsExactly("CONFIRMED");
+        Integer refundsInDb = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM ticket_refunds WHERE ticket_id = ?", Integer.class, ticketId);
+        assertThat(refundsInDb).isZero();
+
+        // Provider recovers
+        paymentGateway.setFailRefunds(false);
+
+        // Retry cancellation
+        cancel(user.token(), ticketId).andExpect(status().isNoContent());
+
+        // Now ticket is REFUNDED, seats RELEASED, and stable idempotency key used
+        assertThat(ticketStatus(ticketId)).isEqualTo("REFUNDED");
+        assertThat(reservationStatusesOfTicket(ticketId)).containsExactly("RELEASED");
+        FakePaymentGateway.RecordedRefund refund = paymentGateway.refundOf(paymentIntentId).orElseThrow();
+        assertThat(refund.amount()).isEqualByComparingTo("25.00");
+        assertThat(refund.idempotencyKey()).isEqualTo("ticket-" + ticketId + "-refund");
+    }
+
     private org.springframework.test.web.servlet.ResultActions cancel(String token, long ticketId) throws Exception {
         return mockMvc.perform(delete("/api/tickets/" + ticketId)
                 .header("Authorization", TicketApiFixtures.bearer(token)));

@@ -370,6 +370,76 @@ class PaymentWebhookIntegrationTest extends AbstractTicketIntegrationTest {
                 .andExpect(jsonPath("$.result").value(org.hamcrest.Matchers.containsString("no ticket matches")));
     }
 
+    @Test
+    @DisplayName("checkout.session.expired marks ticket EXPIRED and releases its seats")
+    void sessionExpiredMarksTicketExpiredAndReleasesSeats() throws Exception {
+        Show show = fixtures.createShow(fixtures.adminToken());
+        TestUser user = fixtures.registerUser();
+        long ticketId = pendingTicket(user.token(), show.scheduleId(), List.of(show.seat(0)));
+        String payload = StripeEvents.checkoutSessionExpired("evt_test_expired",
+                FakePaymentGateway.sessionIdOf(ticketId), ticketId);
+
+        deliver(payload)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result").value(org.hamcrest.Matchers.containsString("EXPIRED")));
+
+        assertThat(ticketStatus(ticketId)).isEqualTo("EXPIRED");
+        assertThat(reservationStatusesOfTicket(ticketId)).containsExactly("RELEASED");
+        assertThat(fixtures.seatStatus(show.scheduleId(), show.seat(0))).isEqualTo("AVAILABLE");
+    }
+
+    @Test
+    @DisplayName("out-of-order checkout.session.expired after checkout.session.completed is ignored")
+    void outOfOrderExpiredAfterCompletedIsIgnored() throws Exception {
+        Show show = fixtures.createShow(fixtures.adminToken());
+        TestUser user = fixtures.registerUser();
+        long ticketId = pendingTicket(user.token(), show.scheduleId(), List.of(show.seat(1)));
+        payTicket(ticketId);
+        assertThat(ticketStatus(ticketId)).isEqualTo("PAID");
+
+        String payload = StripeEvents.checkoutSessionExpired("evt_test_late_expired",
+                FakePaymentGateway.sessionIdOf(ticketId), ticketId);
+
+        deliver(payload)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result").value(org.hamcrest.Matchers.containsString("ignored: ticket")));
+
+        assertThat(ticketStatus(ticketId)).isEqualTo("PAID");
+        assertThat(reservationStatusesOfTicket(ticketId)).containsExactly("CONFIRMED");
+        assertThat(fixtures.seatStatus(show.scheduleId(), show.seat(1))).isEqualTo("BOOKED");
+    }
+
+    @Test
+    @DisplayName("out-of-order checkout.session.completed after checkout.session.expired refunds late payment exactly once")
+    void outOfOrderCompletedAfterExpiredRefundsExactlyOnce() throws Exception {
+        Show show = fixtures.createShow(fixtures.adminToken());
+        TestUser user = fixtures.registerUser();
+        long ticketId = pendingTicket(user.token(), show.scheduleId(), List.of(show.seat(2)));
+
+        // Session expires first
+        deliver(StripeEvents.checkoutSessionExpired("evt_test_exp_first",
+                FakePaymentGateway.sessionIdOf(ticketId), ticketId))
+                .andExpect(status().isOk());
+        assertThat(ticketStatus(ticketId)).isEqualTo("EXPIRED");
+
+        // Late payment arrives
+        String paymentIntentId = "pi_test_late_after_exp";
+        deliver(completedEvent(ticketId, paymentIntentId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result").value(org.hamcrest.Matchers.containsString("refunded")));
+
+        assertThat(ticketStatus(ticketId)).isEqualTo("REFUNDED");
+        FakePaymentGateway.RecordedRefund refund = paymentGateway.refundOf(paymentIntentId).orElseThrow();
+        assertThat(refund.amount()).isEqualByComparingTo("25.00");
+        assertThat(paymentGateway.refunds()).hasSize(1);
+
+        // Redelivered completed event changes nothing and does not issue a second refund
+        deliver(completedEvent(ticketId, paymentIntentId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result").value(org.hamcrest.Matchers.containsString("already REFUNDED")));
+        assertThat(paymentGateway.refunds()).hasSize(1);
+    }
+
     private String paidAtText(long ticketId) {
         return jdbcTemplate.queryForObject(
                 "SELECT paid_at::text FROM tickets WHERE id = ?", String.class, ticketId);
