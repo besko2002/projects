@@ -148,6 +148,30 @@ describe('org chart', () => {
     expect(await screen.findByText('Boom')).toBeInTheDocument();
   });
 
+  it('retries the first reports page after an initial load error instead of skipping it', async () => {
+    const user = userEvent.setup();
+    let attempts = 0;
+    const mock = installFetchMock(orgRoutes({
+      'GET /api/org-chart/emp-9/children': () => {
+        attempts += 1;
+        return attempts === 1
+          ? { status: 500, body: { message: 'Try again' } }
+          : { body: { content: [NADIA], page: 0, size: 50, totalElements: 1, totalPages: 1 } };
+      },
+    }));
+
+    renderApp('/org-chart');
+    await user.click(await screen.findByRole('button', { name: 'Expand the reports of Omar Said' }));
+    expect(await screen.findByText('Try again')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /load more reports/i }));
+    const tree = screen.getByRole('list', { name: 'Organisation chart' });
+    expect(await within(tree).findByText('Nadia Hassan')).toBeInTheDocument();
+    expect(mock.urlsFor('GET', '/api/org-chart/emp-9/children')).toEqual([
+      '/api/org-chart/emp-9/children',
+      '/api/org-chart/emp-9/children',
+    ]);
+  });
+
   it('shows the empty state when the tree has no root', async () => {
     installFetchMock(orgRoutes({ 'GET /api/org-chart': { body: [] } }));
 
@@ -210,14 +234,14 @@ describe('org chart', () => {
     const loadMoreRootsBtn = await screen.findByRole('button', { name: /load more roots/i });
     expect(loadMoreRootsBtn).toBeInTheDocument();
 
-    // Click load more roots
-    await user.click(loadMoreRootsBtn);
-    expect(await screen.findByText('Second Root')).toBeInTheDocument();
-
-    // Expand Omar Said
+    // Expand the first root before appending more roots: its loaded branch must survive.
     await user.click(screen.getByRole('button', { name: 'Expand the reports of Omar Said' }));
     const tree = await screen.findByRole('list', { name: 'Organisation chart' });
     expect(await within(tree).findByText('Nadia Hassan')).toBeInTheDocument();
+
+    await user.click(loadMoreRootsBtn);
+    expect(await screen.findByText('Second Root')).toBeInTheDocument();
+    expect(within(tree).getByText('Nadia Hassan')).toBeInTheDocument();
 
     // Load more reports button is visible
     const loadMoreReportsBtn = await screen.findByRole('button', { name: /load more reports/i });

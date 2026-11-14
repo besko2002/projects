@@ -171,11 +171,9 @@ export function OrgChartPage(): JSX.Element {
 
   // Nodes start collapsed: nothing below the root level is fetched until it is asked for.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  // The levels below the root are cached under a key that contains the shape of the root level,
-  // so a changed root invalidates the cached levels without an effect that would reset state.
-  const rootVersion = allRoots
-    .map((node) => `${node.id}:${node.childCount}`)
-    .join('|');
+  // Appending root pages must not invalidate already expanded branches. Only a changed
+  // initial root page starts a new cache version.
+  const rootVersion = initialVersion;
   const [childrenById, setChildrenById] = useState<Map<string, OrgChartNode[]>>(new Map());
   const [childPagingById, setChildPagingById] = useState<Map<string, ChildPaging>>(new Map());
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
@@ -230,7 +228,8 @@ export function OrgChartPage(): JSX.Element {
   // Load subsequent page of reports for a node.
   const loadMoreChildren = useCallback((id: string): void => {
     const cacheKey = `${rootVersion}:${id}`;
-    const currentPaging = childPagingById.get(cacheKey) ?? { page: 0, totalPages: 1, totalElements: 0 };
+    // No successful page yet (for example after an initial error): retry page 0.
+    const currentPaging = childPagingById.get(cacheKey) ?? { page: -1, totalPages: 1, totalElements: 0 };
     const nextPage = currentPaging.page + 1;
     setLoadingMoreChildIds((current) => new Set(current).add(id));
     setErrors((current) => {
