@@ -18,8 +18,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Bounded load and scalability benchmark for Payroll processing and streaming export
- * under a constrained JVM heap (-Xmx384m).
+ * In-memory micro-benchmark for POI SXSSFWorkbook streaming generation and PayrollCalculator.
+ *
+ * <p>NOTE: This is an isolated in-memory component micro-benchmark, not a full-stack database/HTTP
+ * capacity measurement. Point-in-time heap readings are snapshots, not guaranteed continuous peak memory.
+ * Full-stack 20,000 employee operations remain explicitly unverified due to runner resource bounds.
  */
 class PayrollScaleBenchmarkTest {
 
@@ -27,13 +30,13 @@ class PayrollScaleBenchmarkTest {
     private final PayrollRates rates = PayrollRatesFixture.defaults();
 
     @Test
-    @DisplayName("5,000 employee roster bounded load test")
+    @DisplayName("5,000 employee roster in-memory micro-benchmark")
     void benchmark5000EmployeeRoster() throws Exception {
         runRosterBenchmark(5_000);
     }
 
     @Test
-    @DisplayName("20,000 employee roster bounded load test")
+    @DisplayName("20,000 employee roster in-memory micro-benchmark (isolated POI/calc only; full-stack unverified)")
     void benchmark20000EmployeeRoster() throws Exception {
         runRosterBenchmark(20_000);
     }
@@ -123,21 +126,22 @@ class PayrollScaleBenchmarkTest {
         long endTime = System.currentTimeMillis();
         long durationMs = endTime - startTime;
         long finalHeap = memoryBean.getHeapMemoryUsage().getUsed();
-        long peakHeapMb = Math.max(initialHeap, finalHeap) / (1024 * 1024);
+        long heapSnapshotMb = Math.max(initialHeap, finalHeap) / (1024 * 1024);
 
-        System.out.println("=== BENCHMARK RESULT ===");
+        System.out.println("=== MICRO-BENCHMARK RESULT (POI / CALCULATOR ONLY) ===");
         System.out.printf("Roster Size:       %d employees%n", rosterSize);
         System.out.printf("Execution Time:    %d ms (%.2f s)%n", durationMs, durationMs / 1000.0);
         System.out.printf("Throughput:        %.1f payslips/sec%n", (rosterSize * 1000.0) / durationMs);
-        System.out.printf("Peak Heap Used:    %d MB%n", peakHeapMb);
+        System.out.printf("Heap Snapshot:     %d MB (point-in-time snapshot, not guaranteed peak)%n", heapSnapshotMb);
         System.out.printf("Success Count:     %d%n", successCount.get());
         System.out.printf("Error Count:       %d%n", errorCount.get());
         System.out.printf("Total Gross Sum:   %s%n", totalGross);
         System.out.printf("Total Net Sum:     %s%n", totalNet);
-        System.out.println("========================");
+        System.out.println("Full-stack 20,000 capacity is unverified.");
+        System.out.println("=====================================================");
 
         assertThat(errorCount.get()).isZero();
         assertThat(successCount.get()).isEqualTo(rosterSize);
-        assertThat(peakHeapMb).isLessThan(384);
+        assertThat(heapSnapshotMb).isLessThan(384);
     }
 }
