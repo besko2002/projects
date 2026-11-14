@@ -276,4 +276,34 @@ class TicketCheckoutIntegrationTest extends AbstractTicketIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fieldErrors.scheduleId").exists());
     }
+
+    @Test
+    @DisplayName("a stale pending ticket whose holds expired is auto-expired when the user checks out a new hold")
+    void stalePendingTicketIsAutoExpiredOnFreshCheckout() throws Exception {
+        Show show = fixtures.createShow(fixtures.adminToken());
+        TestUser user = fixtures.registerUser();
+        // 1. User holds seat 0 and opens a checkout
+        fixtures.holdSeats(user.token(), show.scheduleId(), List.of(show.seat(0)));
+        long firstTicketId = checkout(user.token(), show.scheduleId()).path("ticketId").asLong();
+        assertThat(ticketStatus(firstTicketId)).isEqualTo("PENDING_PAYMENT");
+
+        // 2. Holds expire and are swept
+        jdbcTemplate.update(
+                "UPDATE seat_reservations SET expires_at = now() - interval '1 minute' WHERE schedule_id = ? AND status = 'HELD'",
+                show.scheduleId());
+        sweeper.sweep();
+        assertThat(reservationStatusesOfUser(user.id(), show.scheduleId())).containsExactly("RELEASED");
+
+        // 3. User holds seat 1 in the same schedule
+        fixtures.holdSeats(user.token(), show.scheduleId(), List.of(show.seat(1)));
+
+        // 4. User checks out: old ticket becomes EXPIRED, new ticket is created and returned
+        JsonNode body = checkout(user.token(), show.scheduleId());
+        long secondTicketId = body.path("ticketId").asLong();
+
+        assertThat(secondTicketId).isNotEqualTo(firstTicketId);
+        assertThat(ticketStatus(firstTicketId)).isEqualTo("EXPIRED");
+        assertThat(ticketStatus(secondTicketId)).isEqualTo("PENDING_PAYMENT");
+        assertThat(body.path("status").asText()).isEqualTo("PENDING_PAYMENT");
+    }
 }

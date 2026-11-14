@@ -183,15 +183,28 @@ public class TicketService {
         Optional<Ticket> pending = ticketRepository.findFirstByUserIdAndScheduleIdAndStatusOrderByIdDesc(
                 userId, scheduleId, TicketStatus.PENDING_PAYMENT);
         if (pending.isPresent()) {
-            // Holds that are not attached to the pending ticket would not be covered by its payment.
-            boolean extraHolds = held.stream().anyMatch(reservation -> reservation.ticketId() == null);
-            if (extraHolds) {
-                throw new ConflictException(
-                        ("A checkout is already pending for schedule %d (ticket %d) and does not cover the seats you "
-                                + "held since; pay or cancel ticket %d first")
-                                .formatted(scheduleId, pending.get().getId(), pending.get().getId()));
+            Ticket pendingTicket = pending.get();
+            List<SeatReservationDto> liveTicketHolds =
+                    seatReservationService.listLiveHeldSeatsOfTicket(pendingTicket.getId());
+            if (liveTicketHolds.isEmpty()) {
+                // The seat holds attached to this pending ticket have expired.
+                // Mark the dead pending ticket EXPIRED so the user can check out their new hold.
+                pendingTicket.markExpired(OffsetDateTime.now());
+                seatReservationService.releaseSeatsOfTicket(pendingTicket.getId());
+                ticketRepository.flush();
+                expireCheckoutSessionQuietly(pendingTicket);
+                pending = Optional.empty();
+            } else {
+                // Holds that are not attached to the pending ticket would not be covered by its payment.
+                boolean extraHolds = held.stream().anyMatch(reservation -> reservation.ticketId() == null);
+                if (extraHolds) {
+                    throw new ConflictException(
+                            ("A checkout is already pending for schedule %d (ticket %d) and does not cover the seats you "
+                                    + "held since; pay or cancel ticket %d first")
+                                    .formatted(scheduleId, pendingTicket.getId(), pendingTicket.getId()));
+                }
+                return new TicketCheckoutResult(existingCheckout(pendingTicket), false);
             }
-            return new TicketCheckoutResult(existingCheckout(pending.get()), false);
         }
 
         BigDecimal total = seatReservationService.totalPriceOf(held);
