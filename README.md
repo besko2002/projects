@@ -2,6 +2,10 @@
 
 Each folder is a self-contained project with its own README, setup and tests.
 
+For native macOS startup (HR, movies, AI documents, and image colorization), see
+[NATIVE.md](NATIVE.md). Only the order-processing microservices stack needs Docker for
+its normal local runtime; Docker remains optional for integration tests in the other projects.
+
 | Project | What it is |
 |---|---|
 | [image-colorization](image-colorization/) | Image colorization website: Python backend with a simple web frontend. |

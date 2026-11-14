@@ -43,6 +43,21 @@ tools (see [Frontend](#frontend)).
 
 ## Run it
 
+### Native macOS (no Docker at runtime)
+
+See [the shared native setup guide](../NATIVE.md) for Java 21, PostgreSQL 16,
+private settings, and preserving existing data. From the repository root:
+
+```bash
+python3 scripts/native.py start hr
+python3 scripts/native.py stop hr
+```
+
+The UI remains at <http://localhost:5175>. Stop the Docker HR stack before using
+these same ports; keep its database volume as a rollback snapshot.
+
+### Docker alternatives
+
 Create your local environment file first (`.env.local` is git-ignored):
 
 ```bash

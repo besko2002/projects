@@ -40,12 +40,28 @@ JUnit 5 / Mockito / Testcontainers · Docker & Docker Compose.
 ## Prerequisites
 
 - **JDK 21** (`java -version` → 21). On macOS: `export JAVA_HOME=$(/usr/libexec/java_home -v 21)`.
-- **Docker Desktop** (or another Docker engine) — needed for PostgreSQL, for the Testcontainers
-  tests and for the container image.
+- **PostgreSQL 16**, either native or in Docker. Docker Desktop (or another Docker engine)
+  is needed only for the Testcontainers tests and optional container builds/runs.
 - Optional: the [Stripe CLI](https://docs.stripe.com/stripe-cli) to exercise real payments.
 - No local Maven install required; use `./mvnw`.
 
 ## Quick start
+
+### Native macOS (no Docker at runtime)
+
+See [the shared native setup guide](../NATIVE.md). It uses Java 21 and a native
+PostgreSQL 16 database. From the repository root:
+
+```bash
+python3 scripts/native.py start movies
+python3 scripts/native.py stop movies
+```
+
+Native Swagger: <http://localhost:8093/swagger-ui.html>. Port **8093** avoids
+conflicting with the microservices gateway at 8080. Native private settings are
+stored separately from Docker settings; Stripe still requires your own test keys.
+
+### Docker alternatives
 
 Copy the example environment first (optional for local runs — every value has a sane default):
 

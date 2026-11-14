@@ -40,52 +40,64 @@ colorization_fullstack/
 └── README.md
 ```
 
-## How to run
+## Native local startup (no Docker)
 
-### 1) Put your checkpoint in the backend folder
-Expected path by default:
+Run these commands from this project's directory. Use **Python 3.11 or 3.12**;
+`numpy==1.26.4` in [requirements.txt](<backend/requirements.txt>) is unsuitable for Python 3.13.
+Provide a compatible interpreter first if none is available; the launcher does not
+install Python or packages. The old `venv/` may be a Windows environment and must
+not be reused on macOS/Linux.
 
-```text
-backend/colorization_best.pth
+### 1) Create an isolated environment and explicitly install dependencies
+
+```bash
+python3.12 -m venv .venv  # python3.11 is also supported
+.venv/bin/python -m pip install -r backend/requirements.txt
 ```
 
-Or set a custom path:
+The project-local `.venv/` is already ignored by Git. Do not use global pip or
+`sudo`. The install includes large PyTorch/ML packages; it is an explicit setup
+step, never performed by the launcher. No native dependencies are bundled or
+assumed installed.
+
+### 2) Supply a trusted trained checkpoint for actual inference
+
+The native launcher defaults to `backend/colorization_best.pth`. This checkpoint
+is **not included**. Alternatively:
 
 ```bash
 export MODEL_CHECKPOINT=/full/path/to/colorization_best.pth
 ```
 
-### 2) Create virtual environment
+Relative checkpoint paths resolve from this project directory. Use only trusted
+checkpoints: the existing model loader uses `torch.load(..., weights_only=False)`.
+The launcher overrides the backend's legacy Windows checkpoint setting in memory;
+it does not change the backend or model implementation.
+
+### 3) Check and start
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+sh ./run-native.sh --check
+sh ./run-native.sh
 ```
 
-### 3) Install requirements
+The shell launcher always uses this project's `.venv/bin/python` and works from
+any current directory when invoked by path. `--check` checks Python version,
+dependency module presence and checkpoint existence without importing the backend,
+creating database records, or binding a port. It exits nonzero for missing
+prerequisites; file existence is not validation of model weights.
 
-```bash
-pip install -r backend/requirements.txt
-```
+Open <http://127.0.0.1:5000>. The backend also serves the frontend: no separate
+frontend process is needed. Startup binds **only loopback**, with debug and the
+reloader disabled. Stop with Ctrl-C. If port 5000 is occupied (for example by
+macOS AirPlay Receiver), stop that listener before retrying. This is a local
+Flask development server, not a production deployment.
 
-### 4) Run the app
-From the parent folder that contains `colorization_fullstack`:
-
-```bash
-python -m backend.app
-```
-
-Or from inside the project folder:
-
-```bash
-python -m backend.app
-```
-
-The app runs on:
-
-```text
-http://127.0.0.1:5000
-```
+Without the checkpoint, startup warns and preserves the backend's existing
+grayscale fallback; **this is not working colorization**. All native requirements
+are still needed because ML modules are imported unconditionally. A passing
+`/api/health` response only confirms the API, not model availability. No checkpoint
+or model dependencies are downloaded by either launcher.
 
 ## Default seeded admin
 If the database is empty, the app seeds:
@@ -94,10 +106,10 @@ If the database is empty, the app seeds:
 - Password: `admin123`
 
 ## Notes
-- SQLite is used by default so the project works immediately.
-- To use PostgreSQL instead, set `DATABASE_URL`.
+- SQLite is used by default after native dependencies are installed; local data is stored in the ignored `backend/instance/` directory.
+- To use PostgreSQL instead, set `DATABASE_URL` and separately provide its Python driver. Native startup does not require PostgreSQL or Docker.
 - The current model service preserves your uploaded inference logic as closely as possible.
-- If `segmentation_models_pytorch` is not installed or the checkpoint is missing, the app falls back to a grayscale passthrough image so the rest of the app still runs.
+- A missing checkpoint produces grayscale passthrough, not actual inference. Missing `segmentation_models_pytorch` (or other imported dependencies) prevents startup.
 
 ## Main API routes
 

@@ -41,6 +41,21 @@ React 18 · TypeScript · Vite · Vitest + Testing Library · nginx · Docker Co
 
 ## Run it
 
+### Native macOS (no Docker at runtime)
+
+See [the shared native setup guide](../NATIVE.md) for Java 21 and native PostgreSQL 16
+with pgvector. From the repository root:
+
+```bash
+python3 scripts/native.py start ai
+python3 scripts/native.py stop ai
+```
+
+The UI remains at <http://localhost:5174>. Set `GEMINI_API_KEY` in the private native
+configuration to upload documents and ask questions; startup alone does not verify AI calls.
+
+### Docker alternatives
+
 You need Docker and a free Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey) (no credit card).
 
 ```bash
