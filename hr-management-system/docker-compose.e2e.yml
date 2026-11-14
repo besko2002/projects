@@ -1,0 +1,51 @@
+# Throwaway stack for the end-to-end tests: its own project, a database in RAM and a
+# known bootstrap administrator. The demo stack is not touched.
+services:
+  postgres:
+    container_name: hr-e2e-postgres
+    ports: !reset []
+    volumes: !reset []
+    tmpfs:
+      - /var/lib/postgresql/data:size=1g
+    command:
+      - sh
+      - -c
+      - |
+        case "$$POSTGRES_PASSWORD" in
+          ""|hr|postgres|password|secret|changeme|change-me|admin|administrator|root|letmein|welcome|qwerty|123456|123456789|dbpassword|db_password|localdev|local-dev)
+            echo "POSTGRES_PASSWORD is missing or a placeholder password." >&2
+            exit 1
+            ;;
+        esac
+        if [ "$${#POSTGRES_PASSWORD}" -lt 12 ]; then
+          echo "POSTGRES_PASSWORD must be at least 12 characters long." >&2
+          exit 1
+        fi
+        exec docker-entrypoint.sh postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-hr}
+      POSTGRES_USER: ${DB_USERNAME:-hr}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
+
+  app:
+    container_name: hr-e2e-app
+    ports: !override
+      - "127.0.0.1:8092:8091"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-hr}
+      DB_USERNAME: ${DB_USERNAME:-hr}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
+      SERVER_PORT: 8091
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      HR_ADMIN_EMAIL: ${HR_ADMIN_EMAIL:-admin@hr.local}
+      HR_ADMIN_PASSWORD: ${HR_ADMIN_PASSWORD:?HR_ADMIN_PASSWORD must be set}
+      LOG_LEVEL_APP: ${LOG_LEVEL_APP:-INFO}
+
+  frontend:
+    container_name: hr-e2e-frontend
+    ports: !override
+      - "127.0.0.1:5176:80"
+
+volumes:
+  postgres-data:
+    name: hr-e2e-postgres-data

@@ -1,0 +1,57 @@
+# Dependency updates for the HR management system (and the shared workflows).
+#
+# Security updates are applied immediately; the rest are grouped into one pull request per
+# ecosystem per week, so a reviewer sees the whole change of a kind at once.
+version: 2
+
+updates:
+  - package-ecosystem: maven
+    directory: /hr-management-system
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    groups:
+      spring-boot:
+        patterns: ["org.springframework.*", "org.springframework.boot.*"]
+    labels: [dependencies, java]
+
+  - package-ecosystem: npm
+    directory: /hr-management-system/frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    groups:
+      testing:
+        patterns: ["vitest", "@vitest/*", "@testing-library/*", "jsdom"]
+    labels: [dependencies, frontend]
+
+  - package-ecosystem: docker
+    directory: /hr-management-system
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    labels: [dependencies, docker]
+
+  - package-ecosystem: docker
+    directory: /hr-management-system/frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    labels: [dependencies, docker]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    labels: [dependencies, ci]
