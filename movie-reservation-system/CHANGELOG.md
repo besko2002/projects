@@ -20,6 +20,15 @@ All notable changes to the Movie Reservation System backend are documented in th
   The automated suite (206 tests) still never calls Stripe over the network.
 
 ### Added
+- **CineBook Customer Booking Frontend**: Built modern React 18, TypeScript, and Vite single-page application under `movie-reservation-system/frontend/` matching approved design:
+  - Screen 1: Home page featuring now-showing catalogue, day selector (today + 6 days), genre chips, movie cards, and direct showtime pills.
+  - Screen 2: Movie detail page with synopsis, metadata, and showtime slots grouped by cinema hall with standard and VIP pricing.
+  - Screen 3: Interactive seat selection with SVG screen arc, dual-symbol seat map (Standard, VIP, Selected, Held, Booked), 8-seat cap enforcement, hold countdown timer, and booking summary.
+  - Screen 4: Payment confirmed voucher page with webhook-based polling for payment verification, entry reference code, and refund cutoff warning.
+  - Screen 5: Tabbed ticket management (`Upcoming`, `Past`, `Cancelled & refunded`) with self-service cancellation and automatic full Stripe refund.
+  - Screens 6 & 7: Dark-themed Sign In and Registration pages supporting return-URL preserves during checkout.
+- **Frontend Test Suite**: 15 unit and integration tests covering API client authentication, error handling, 8-seat limit enforcement, hold countdown expiration, auth redirects, payment success polling, ticket status rendering, and WCAG AA contrast verification.
+- **Native Runtime Integration**: Integrated `movies-ui` into `scripts/native.py` running on port 5177 with automatic reverse proxy for `/api` and `/payment` to backend on port 8093.
 - **Webhook Expiry and Out-of-Order Lifecycle Tests**: Added integration tests in `PaymentWebhookIntegrationTest` covering critical distributed edge cases:
   - `sessionExpiredMarksTicketExpiredAndReleasesSeats`: Verifies `checkout.session.expired` webhook transitions ticket to `EXPIRED` and frees seats for re-booking.
   - `outOfOrderExpiredAfterCompletedIsIgnored`: Verifies late `checkout.session.expired` webhook received after `checkout.session.completed` is ignored without altering `PAID` ticket or `CONFIRMED` seats.

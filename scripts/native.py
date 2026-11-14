@@ -26,7 +26,7 @@ PG_DATA = HOME / 'postgres16'
 PG_PORT = int(os.environ.get('NATIVE_PG_PORT', '55432'))
 APPS = {
     'hr': ('hr-management-system', 8091, 5175),
-    'movies': ('movie-reservation-system', 8093, None),
+    'movies': ('movie-reservation-system', 8093, 5177),
     'ai': ('ai-document-assistant', 8090, 5174),
 }
 

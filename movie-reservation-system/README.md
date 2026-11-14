@@ -1,10 +1,14 @@
-# Movie Reservation System — REST API
+# Movie Reservation System & CineBook Frontend
 
 [![CI](https://github.com/besko2002/projects/actions/workflows/movie-reservation-system.yml/badge.svg)](https://github.com/besko2002/projects/actions/workflows/movie-reservation-system.yml)
 
-A cinema booking backend: browse movies and showtimes, hold seats for a few minutes, pay through
-Stripe Checkout, and cancel with a full refund before the show. API only — no frontend; explore it
-with Swagger UI at <http://localhost:8080/swagger-ui.html>.
+A cinema booking application with a Spring Boot REST API and a React customer booking website
+(**CineBook**): browse movies and showtimes, hold seats with a countdown timer, pay through Stripe
+Checkout, and cancel with a full refund before the show.
+
+- **CineBook UI**: <http://localhost:5177>
+- **Swagger UI**: <http://localhost:8093/swagger-ui.html> (or <http://localhost:8080/swagger-ui.html> in Docker)
+- **Actuator Health**: <http://localhost:8093/actuator/health>
 
 ## Overview & architecture
 
@@ -13,7 +17,7 @@ that each own their tables, entities and repositories. A module never touches an
 repository — it calls that module's public service.
 
 ```
-                ┌──────────────────── client (Swagger UI / Postman) ────────────────────┐
+                ┌──────────────────── client (CineBook / Swagger UI) ────────────────────┐
                 │                                                                       │
   users ──── movies ──── theaters ──── seatreservation ──── tickets ────────────► Stripe
     │           │            │               │                  │
@@ -57,9 +61,40 @@ python3 scripts/native.py start movies
 python3 scripts/native.py stop movies
 ```
 
-Native Swagger: <http://localhost:8093/swagger-ui.html>. Port **8093** avoids
-conflicting with the microservices gateway at 8080. Native private settings are
-stored separately from Docker settings; Stripe still requires your own test keys.
+- **CineBook UI**: <http://localhost:5177>
+- **Native Swagger**: <http://localhost:8093/swagger-ui.html>
+- **Native API Port**: **8093** (avoids conflicting with the microservices gateway at 8080)
+- Private settings are stored in `../.native/config/movies.json` outside the Git repo;
+  Stripe still requires your own test keys for real payments.
+
+### CineBook customer frontend (`frontend/`)
+
+Built with React 18, TypeScript, Vite, React Router, Vitest, Testing Library, and ESLint.
+Runs on port 5177 with Vite proxy forwarding `/api` and `/payment` to `http://localhost:8093`.
+
+#### Screens
+1. **Home**: Now showing movie grid, featured hero, day selector, genre filter chips, and search.
+2. **Movie & Showtimes**: Detailed synopsis, runtime, genre chips, and showtime slots grouped by cinema hall.
+3. **Seat Selection**: Interactive hall seat grid (Standard & VIP seats), real-time hold countdown timer, pricing summary, and Stripe checkout trigger.
+4. **Payment Success**: Webhook-confirmed ticket status polling, entry code, and downloadable/printable cinema ticket voucher.
+5. **My Tickets**: Tabbed ticket management (`Upcoming`, `Past`, `Cancelled & refunded`), with in-app cancellation and automated Stripe refund processing.
+6. **Authentication**: Sign in and registration modals/pages with seamless redirect back to selected seats.
+
+Screenshots are catalogued under `docs/screenshots/frontend/`:
+- `1-home.png`
+- `2-movie-showtimes.png`
+- `3-seat-selection.png`
+- `4-payment-success.png`
+- `5-my-tickets.png`
+- `6-sign-in.png`
+- `7-register.png`
+
+#### Accessibility & Contrast
+All color combinations strictly comply with WCAG 2.1 AA (≥ 4.5:1 for standard text, ≥ 3:1 for UI boundaries). Faint secondary text is elevated to `#9298ba` (> 5.5:1 on background `#0b0d16`). Seats feature dual sensory indicators (shape/color + diamond `◆`, checkmark `✓`, clock `⏱`, and cross `✕` symbols) with full screen-reader ARIA labeling. Reduced-motion preferences are honored.
+
+#### Design Scope & Limitations
+- Strict adherence to the backend API: unsupported mock data (star ratings, trailers, coming soon tab, QR codes) is intentionally omitted.
+- Public deployment is out of scope; runs natively or via Docker. Stripe test mode operates with test card `4242 4242 4242 4242`.
 
 ### Docker alternatives
 

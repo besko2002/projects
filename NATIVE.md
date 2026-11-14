@@ -36,6 +36,7 @@ Node.js and Python 3 must be available on PATH.
 python3 scripts/setup-native.py
 # Install JS dependencies only where they are not already installed:
 (cd hr-management-system/frontend && npm ci)
+(cd movie-reservation-system/frontend && npm ci)
 (cd ai-document-assistant/frontend && npm ci)
 python3 scripts/native.py build hr
 python3 scripts/native.py build movies
@@ -63,11 +64,11 @@ python3 scripts/native.py status all
 | Project | UI / explorer | API | Database |
 |---|---|---|---|
 | HR | http://localhost:5175 | http://localhost:8091 | `hr` |
-| Movies | http://localhost:8093/swagger-ui.html | http://localhost:8093 | `movie_reservation` |
+| Movies | http://localhost:5177 (CineBook) · http://localhost:8093/swagger-ui.html | http://localhost:8093 | `movie_reservation` |
 | AI documents | http://localhost:5174 | http://localhost:8090 | `docassistant` |
 
 The movie API uses **8093** rather than its default 8080, because the Docker microservices
-API gateway uses 8080. Vite runs the HR and AI frontends natively and proxies `/api` to
+API gateway uses 8080. Vite runs the HR, CineBook (port 5177), and AI frontends natively and proxies `/api` to
 the corresponding native API. All native services bind to loopback.
 
 The launcher refuses to take over occupied ports and only stops processes it started,
