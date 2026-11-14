@@ -43,21 +43,42 @@ tools (see [Frontend](#frontend)).
 
 ## Run it
 
+Create your local environment file first (`.env.local` is git-ignored):
+
 ```bash
-docker compose up -d --wait                                   # Postgres 16 on localhost:5437
+cp .env.example .env.local   # set DB_PASSWORD and JWT_SECRET; set HR_ADMIN_PASSWORD to seed an initial admin
+```
+
+Because Docker Compose by default looks for `.env` rather than `.env.local`, pass `--env-file .env.local` on Compose commands. You can verify the configuration without starting containers:
+
+```bash
+docker compose --env-file .env.local --profile app config --quiet
+```
+
+### Option A — Postgres in Docker, application from Maven
+
+```bash
+docker compose --env-file .env.local up -d --wait             # Postgres 16 on 127.0.0.1:5437
+set -a; . ./.env.local; set +a                                # export trusted local settings for Java
 JAVA_HOME=$(/usr/libexec/java_home -v 21) ./mvnw clean verify  # build + tests (Testcontainers)
 java -jar target/hr-management-system-0.0.1-SNAPSHOT.jar       # http://localhost:8091
 ```
 
-### Run the API in Docker
+### Option B — Run the full stack in Docker (API + Frontend + Postgres)
 
 ```bash
-# Postgres alone (default): already covered by `docker compose up -d --wait`
-# API + Postgres:
-cp .env.example .env.local   # set JWT_SECRET and HR_ADMIN_PASSWORD (both required, no defaults)
-docker compose --profile app up -d --build --wait
-# or build the image alone:
+docker compose --env-file .env.local --profile app up -d --build --wait
+# or build the API image alone:
 docker build -t hr-management-system:local .
+```
+
+For a local smoke check after Option B, confirm that the API and frontend respond:
+
+```bash
+curl -fsS http://localhost:8091/actuator/health
+curl -fsSI http://localhost:5175/
+# When finished, stop the containers without deleting the database volume:
+docker compose --env-file .env.local --profile app down
 ```
 
 - Swagger UI: <http://localhost:8091/swagger-ui.html> — disabled by default; set `SPRINGDOC_ENABLED=true`
@@ -65,6 +86,12 @@ docker build -t hr-management-system:local .
 - Health: <http://localhost:8091/actuator/health>
 - Configuration: every value in `application.yml` is env-overridable — see [.env.example](.env.example).
   The image does **not** bake in `JWT_SECRET` / passwords; pass them at runtime.
+- `DB_PASSWORD` is required with no default (`${DB_PASSWORD:?DB_PASSWORD must be set - see .env.example}`);
+  the application and the PostgreSQL container reject placeholder values ("hr", "postgres", etc.)
+  at startup; `docker compose config` only checks that the variable is present. Note that changing
+  `DB_PASSWORD` later does not alter the password inside an already initialized PostgreSQL volume
+  (`POSTGRES_PASSWORD` is only evaluated upon initial empty-directory creation). Do not delete or recreate
+  existing database volumes to avoid data loss.
 - `JWT_SECRET` is required (≥ 32 bytes); the app fails fast at startup without it.
 - On first start an ADMIN is seeded from `HR_ADMIN_EMAIL` (default `admin@hr.local`) / `HR_ADMIN_PASSWORD`
   (no default — nothing is seeded while it is unset) and only when no ADMIN exists. The seeded admin
@@ -573,7 +600,7 @@ and days after leaving are not counted as absences.
 React 18 + TypeScript + Vite, plain CSS (no UI library), served by nginx in Docker (it proxies `/api` to the backend).
 
 ```bash
-docker compose --profile app up -d --build      # backend + PostgreSQL + frontend  ->  http://localhost:5175
+docker compose --env-file .env.local --profile app up -d --build      # backend + PostgreSQL + frontend  ->  http://localhost:5175
 # development:  cd frontend && npm install && npm run dev      (proxies /api to :8091)
 ```
 
@@ -603,6 +630,30 @@ switches off for visitors who enable *reduce motion* in their OS.
 Frontend tests: `cd frontend && npm test -- --run` (Vitest + Testing Library, fetch mocked). The full flow
 (forced password change, check-in, leave request, manager approval, salary hidden from the manager) was also driven
 through a real browser against the Docker stack.
+
+### Frontend Dependency Audit & Security Status
+
+`npm audit` and `npm audit --omit=dev --audit-level=low` both report **0 vulnerabilities**. The
+last open development-tooling advisory ([GHSA-82fw-gwwq-j7x9](https://github.com/advisories/GHSA-82fw-gwwq-j7x9),
+Vitest's `@vitest/mocker` redirect-mock path traversal) is closed by the upgrade to **Vitest
+4.1.12**, and the temporary `@vitest/mocker` / `tinypool` overrides that papered over it are
+**gone** - the fixed versions are used directly.
+
+| Tooling | Version | Advisory | Status |
+|---|---|---|---|
+| Vitest (dev-only) | `^4.1.12` (4.1.12) | [GHSA-82fw-gwwq-j7x9](https://github.com/advisories/GHSA-82fw-gwwq-j7x9) (moderate, fixed in 4.1.11+) | Fixed - the runner is outside the affected range and no override is needed |
+| `minimatch` (dev-only) | overridden to `^11.0.8` | transitive advisories in older 3.x lines | Resolved by the override; production dependencies are unaffected |
+
+Recheck after every dependency change:
+
+```bash
+npm ci
+npm test -- --run     # 193 tests
+npm run build
+npm run lint
+npm audit
+npm audit --omit=dev --audit-level=low
+```
 
 ## License
 

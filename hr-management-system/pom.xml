@@ -79,6 +79,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- The shared login throttle (see app.login-rate-limit.store): Redis-backed when the
+             stack runs more than one instance, in-memory otherwise. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
 
         <!-- Reporting: Excel exports and payslip PDFs -->
         <dependency>
