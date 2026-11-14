@@ -291,10 +291,15 @@ class PayrollRunIntegrationTest extends AbstractPayrollIntegrationTest {
         UUID runId = runIdOf(createRunOk(hrToken, MONTH_YEAR, MONTH));
         Long before = jdbc.queryForObject("select count(*) from payslips", Long.class);
 
-        recalculate(hrToken, runId).andExpect(status().isOk());
-        recalculate(hrToken, runId).andExpect(status().isOk());
+        JsonNode response1 = body(recalculate(hrToken, runId).andExpect(status().isOk()));
+        assertThat(response1.path("run").path("payslipCount").asLong()).isEqualTo(before);
+        assertThat(response1.path("totals").path("employees").asLong()).isEqualTo(before);
 
-        assertThat(jdbc.queryForObject("select count(*) from payslips", Long.class)).isEqualTo(before);
+        JsonNode response2 = body(recalculate(hrToken, runId).andExpect(status().isOk()));
+        assertThat(response2.path("run").path("payslipCount").asLong()).isEqualTo(before);
+        assertThat(response2.path("totals").path("employees").asLong()).isEqualTo(before);
+
+        assertThat(jdbc.queryForObject("select count(*) from payslips where run_id = ?", Long.class, runId)).isEqualTo(before);
     }
 
     @Test

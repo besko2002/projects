@@ -136,4 +136,67 @@ class PayrollBatchBoundaryIntegrationTest extends AbstractPayrollIntegrationTest
             jdbc.execute("drop function if exists fail_on_503");
         }
     }
+
+    @Test
+    void recalculateRollbackRestoresOriginalPayslipsOnLaterBatchFailure() throws Exception {
+        String admin = adminToken();
+        int totalEmployees = 105;
+
+        List<Object[]> batchArgs = new ArrayList<>(totalEmployees);
+        for (int i = 0; i < totalEmployees; i++) {
+            UUID id = UUID.randomUUID();
+            String num = "EMP-RC" + String.format("%04d", i);
+            batchArgs.add(new Object[]{
+                    id, num, "Recalc Rollback " + i, "recalc" + i + "@hr.local",
+                    Role.EMPLOYEE.name(), "ACTIVE", "dummy-hash",
+                    LocalDate.of(2024, 1, 1), new BigDecimal("4500.00")
+            });
+        }
+        jdbc.batchUpdate("""
+                insert into employees (id, employee_number, full_name, email, role, status, password_hash, hire_date, salary)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, batchArgs);
+
+        int year = 2025;
+        int month = 3;
+
+        JsonNode runJson = createRunOk(admin, year, month);
+        UUID runId = runIdOf(runJson);
+        assertThat(runJson.path("run").path("payslipCount").asInt()).isEqualTo(totalEmployees);
+
+        List<UUID> initialPayslipIds = jdbc.queryForList("select id from payslips where run_id = ?", UUID.class, runId);
+        assertThat(initialPayslipIds).hasSize(totalEmployees);
+
+        // Force a failure during batch 2 of recalculation (batch size is 100)
+        jdbc.execute("""
+                create or replace function fail_on_later_batch() returns trigger as $$
+                begin
+                    if (select count(*) from payslips where run_id = NEW.run_id) >= 101 then
+                        raise exception 'Simulated batch 2 recalculate failure';
+                    end if;
+                    return new;
+                end;
+                $$ language plpgsql;
+                """);
+        jdbc.execute("""
+                create trigger trigger_fail_on_later_batch
+                before insert on payslips
+                for each row execute function fail_on_later_batch();
+                """);
+
+        try {
+            recalculate(admin, runId).andExpect(status().is5xxServerError());
+
+            // Because recalculate failed in a later batch, the transaction must roll back completely
+            // Original payslips must still be intact
+            List<UUID> postRollbackIds = jdbc.queryForList("select id from payslips where run_id = ?", UUID.class, runId);
+            assertThat(postRollbackIds).containsExactlyInAnyOrderElementsOf(initialPayslipIds);
+
+            String status = jdbc.queryForObject("select status from payroll_runs where id = ?", String.class, runId);
+            assertThat(status).isEqualTo("DRAFT");
+        } finally {
+            jdbc.execute("drop trigger if exists trigger_fail_on_later_batch on payslips");
+            jdbc.execute("drop function if exists fail_on_later_batch");
+        }
+    }
 }

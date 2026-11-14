@@ -132,20 +132,21 @@ public class PayrollService {
     @Transactional
     public PayrollRunDetailResponse recalculate(UUID runId) {
         policy.requireHrOrAdmin(currentEmployee.require(), "recalculate a payroll run");
-        PayrollRun run = requireRun(runId);
+        PayrollRun run = requireRunForUpdate(runId);
         run.requireDraft("recalculated");
-        runs.saveAndFlush(run);
 
         payslips.deleteByRunId(run.getId());
         payslips.flush();
-        return new PayrollRunDetailResponse(toRun(run), buildPayslips(run));
+
+        PayrollTotals totals = buildPayslips(run);
+        return new PayrollRunDetailResponse(toRun(run), totals);
     }
 
     @Transactional
     public PayrollRunResponse finalizeRun(UUID runId) {
         Employee actor = currentEmployee.require();
         policy.requireHrOrAdmin(actor, "finalize a payroll run");
-        PayrollRun run = requireRun(runId);
+        PayrollRun run = requireRunForUpdate(runId);
         run.finalizeRun(actor, now());
         runs.save(run);
         return toRun(run);
@@ -154,7 +155,7 @@ public class PayrollService {
     @Transactional
     public void deleteRun(UUID runId) {
         policy.requireHrOrAdmin(currentEmployee.require(), "delete a payroll run");
-        PayrollRun run = requireRun(runId);
+        PayrollRun run = requireRunForUpdate(runId);
         run.requireDraft("deleted");
         payslips.deleteByRunId(run.getId());
         payslips.flush();
@@ -427,6 +428,11 @@ public class PayrollService {
 
     private PayrollRun requireRun(UUID runId) {
         return runs.findById(runId)
+                .orElseThrow(() -> new ResourceNotFoundException("No payroll run with id " + runId));
+    }
+
+    private PayrollRun requireRunForUpdate(UUID runId) {
+        return runs.findByIdForUpdate(runId)
                 .orElseThrow(() -> new ResourceNotFoundException("No payroll run with id " + runId));
     }
 
