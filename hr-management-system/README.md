@@ -117,7 +117,9 @@ docker compose --env-file .env.local --profile app down
   `LOGIN_FAILURE_WINDOW`, default 15 min) with 429. Behind the nginx proxy the real client IP is used
   (`X-Forwarded-For`, trusted only from private-network proxies), so one visitor cannot lock another out.
   There is no public registration: HR/ADMIN create accounts.
-- CI: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `./mvnw -B verify` on Java 21.
+- CI: [`.github/workflows/hr-management-system.yml`](../.github/workflows/hr-management-system.yml) runs the
+  backend `./mvnw -B verify` on Java 21, the frontend audits/lint/tests/build, and the Playwright browser tests
+  against an isolated Docker stack.
 
 ## API
 
@@ -137,7 +139,8 @@ docker compose --env-file .env.local --profile app down
 | GET | `/api/employees/me/team` | direct reports |
 | GET | `/api/employees/me/team/all` | all descendants with their `depth` |
 | GET | `/api/employees/{id}/chain` | management chain upwards to the root |
-| GET | `/api/org-chart` | any authenticated user — nested company tree |
+| GET | `/api/org-chart` | any authenticated user — root level, paged (`page`, `size` ≤ 200), each node with its `childCount` |
+| GET | `/api/org-chart/{employeeId}/children` | any authenticated user — one employee's direct reports, paged the same way |
 
 ### Leave
 
@@ -177,9 +180,10 @@ docker compose --env-file .env.local --profile app down
 | --- | --- | --- |
 | POST | `/api/payroll/runs` | HR, ADMIN — `{year, month}`; **idempotent**, a second call is 409 |
 | GET | `/api/payroll/runs` | HR, ADMIN — paged, newest month first |
-| GET | `/api/payroll/runs/{id}` | HR, ADMIN — totals + every payslip |
-| POST | `/api/payroll/runs/{id}/recalculate` | HR, ADMIN — DRAFT only, replaces the payslips; 409 once FINALIZED |
-| POST | `/api/payroll/runs/{id}/finalize` | HR, ADMIN — locks the run forever |
+| GET | `/api/payroll/runs/{id}` | HR, ADMIN — the run and its totals |
+| GET | `/api/payroll/runs/{id}/payslips` | HR, ADMIN — the run's payslips, paged (`page`, `size` ≤ 200) |
+| POST | `/api/payroll/runs/{id}/recalculate` | HR, ADMIN — DRAFT only, replaces the payslips under a row lock; 409 once FINALIZED |
+| POST | `/api/payroll/runs/{id}/finalize` | HR, ADMIN — locks the run forever; serialized with recalculate/delete |
 | DELETE | `/api/payroll/runs/{id}` | HR, ADMIN — DRAFT only; 409 once FINALIZED |
 | GET | `/api/payroll/runs/{id}/export.xlsx` | HR, ADMIN — register with a `SUM()` totals row |
 | GET | `/api/payroll/payslips/me` | self — **FINALIZED runs only** |
@@ -606,7 +610,9 @@ and days after leaving are not counted as absences.
   "reason" is stored with a change.
 - **Payroll rates are illustrative** (insurance and tax brackets are configurable examples, not legal or tax advice).
 - Leave is whole days only (no half days); attendance check-in/out is by API, there is no device integration.
-- Login throttling is in memory, so it is per instance and resets on restart.
+- Login throttling is in memory by default (per instance, reset on restart). Set
+  `LOGIN_RATE_LIMIT_STORE=redis` to share it between instances; that store fails open if Redis is unavailable.
+- Full-stack capacity was measured at 5,000 employees; 20,000 remains unverified.
 - The frontend consumes the API as-is: it hides what a role cannot use, but the server is always the authority.
 - No dedicated mobile layout beyond a responsive sidebar; no i18n (English only).
 
@@ -616,6 +622,7 @@ React 18 + TypeScript + Vite, plain CSS (no UI library), served by nginx in Dock
 
 ```bash
 docker compose --env-file .env.local --profile app up -d --build      # backend + PostgreSQL + frontend  ->  http://localhost:5175
+# native (no Docker):  python3 scripts/native.py start hr   from the repository root - see ../NATIVE.md
 # development:  cd frontend && npm install && npm run dev      (proxies /api to :8091)
 ```
 
@@ -638,13 +645,17 @@ on hover, click or keyboard focus (Escape closes it), with the *Sign in* title w
 ![Employees](docs/screenshots/hr-employees.png)
 ![Reports](docs/screenshots/hr-reports.png)
 
-The UI has a violet / pink / teal theme with motion throughout (page transitions, staggered cards, animated
-navigation, a cursor-following glow on cards, growing chart bars, modal and toast animations). Every animation
-switches off for visitors who enable *reduce motion* in their OS.
+The UI uses a warm-paper theme with bold outlines, offset shadows and yellow / blue / pink accents, plus motion
+(page transitions, staggered cards, growing chart bars, modal and toast animations). Every animation switches off
+for visitors who enable *reduce motion* in their OS. Org chart, manager search and payroll payslips load page by
+page, so large organisations stay responsive.
 
-Frontend tests: `cd frontend && npm test -- --run` (Vitest + Testing Library, fetch mocked). The full flow
-(forced password change, check-in, leave request, manager approval, salary hidden from the manager) was also driven
-through a real browser against the Docker stack.
+The screenshots above are regenerated from the running UI with fictional data only:
+`cd frontend && node scripts/capture-docs.mjs` (frontend running on :5175; no database is read).
+
+Frontend tests: `cd frontend && npm test -- --run` (Vitest + Testing Library, fetch mocked). Browser tests:
+`npm run e2e` drives sign-in, forced password change, check-in/out, leave request with manager approval, and a
+payroll create/recalculate/finalize run against a real backend and database.
 
 ### Frontend Dependency Audit & Security Status
 
@@ -663,7 +674,7 @@ Recheck after every dependency change:
 
 ```bash
 npm ci
-npm test -- --run     # 193 tests
+npm test -- --run
 npm run build
 npm run lint
 npm audit
