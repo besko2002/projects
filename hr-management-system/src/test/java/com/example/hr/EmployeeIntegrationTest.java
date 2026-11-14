@@ -43,6 +43,50 @@ class EmployeeIntegrationTest extends AbstractIntegrationTest {
     // ------------------------------------------------------------------ create
 
     @Test
+    void employeeNumbersKeepFourDigitsAndAreNotTruncatedBeyondNineThousandNineHundredNinetyNine()
+            throws Exception {
+        // The old numbering used lpad(..., 4, '0'), and PostgreSQL's lpad TRUNCATES a longer
+        // string: the 10,000th employee became 'EMP-1000', a duplicate of the 1,000th one, and
+        // every create after that failed on the unique index.
+        String admin = adminToken();
+        jdbc.execute("select setval('employee_number_seq', 9999)");
+
+        // 1. Application query path: nextEmployeeNumber()
+        String first = createEmployeeNumber(admin, "Ten Thousand");
+        assertThat(first).isEqualTo("EMP-10000");
+
+        // 2. Database DEFAULT column expression path
+        UUID rawId = UUID.randomUUID();
+        jdbc.update("""
+                insert into employees (id, full_name, email, role, status, password_hash, hire_date)
+                values (?, 'Direct Insert', 'direct10001@hr.local', 'EMPLOYEE', 'ACTIVE', 'dummy-hash', '2024-01-01')
+                """, rawId);
+        String second = employeeNumberOf(rawId);
+        assertThat(second).isEqualTo("EMP-10001");
+
+        // Below the threshold the numbers keep their four digits.
+        jdbc.execute("select setval('employee_number_seq', 999)");
+        assertThat(createEmployeeNumber(admin, "One Thousand")).isEqualTo("EMP-1000");
+    }
+
+    /** Creates an employee through the API and returns the employee number it was given. */
+    private String createEmployeeNumber(String token, String fullName) throws Exception {
+        Map<String, Object> body = payload(fullName,
+                fullName.toLowerCase().replace(' ', '.') + "-" + UUID.randomUUID() + "@hr.local",
+                Role.EMPLOYEE);
+        String response = mvc.perform(post("/api/employees").header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return json.readTree(response).path("employee").path("employeeNumber").asText();
+    }
+
+    private String employeeNumberOf(UUID employeeId) {
+        return jdbc.queryForObject("select employee_number from employees where id = ?",
+                String.class, employeeId);
+    }
+
+    @Test
     void creatingAnEmployeeReturnsTheTemporaryPasswordExactlyOnce() throws Exception {
         String admin = adminToken();
         JsonNode created = body(createRaw(admin, payload("Nina New", "nina.new@hr.local", Role.EMPLOYEE))

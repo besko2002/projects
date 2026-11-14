@@ -244,6 +244,9 @@ export const api = {
   orgChart: (signal?: AbortSignal): Promise<OrgChartNode[]> =>
     request<OrgChartNode[]>('/api/org-chart', { signal }),
 
+  orgChartChildren: (employeeId: string, signal?: AbortSignal): Promise<OrgChartNode[]> =>
+    request<OrgChartNode[]>(`/api/org-chart/${seg(employeeId)}/children`, { signal }),
+
   // ----------------------------------------------------------------- audit
   employeeAudit: (
     id: string,
@@ -369,6 +372,17 @@ export const api = {
 
   getPayrollRun: (runId: string, signal?: AbortSignal): Promise<PayrollRunDetailResponse> =>
     request<PayrollRunDetailResponse>(`/api/payroll/runs/${seg(runId)}`, { signal }),
+
+  payrollRunPayslips: (
+    runId: string,
+    page: number,
+    size: number,
+    signal?: AbortSignal,
+  ): Promise<PageResponse<PayslipResponse>> =>
+    request<PageResponse<PayslipResponse>>(
+      `/api/payroll/runs/${seg(runId)}/payslips${query({ page, size })}`,
+      { signal },
+    ),
 
   recalculatePayrollRun: (runId: string): Promise<PayrollRunDetailResponse> =>
     request<PayrollRunDetailResponse>(`/api/payroll/runs/${seg(runId)}/recalculate`, {

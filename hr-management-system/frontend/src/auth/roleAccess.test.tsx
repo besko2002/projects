@@ -73,6 +73,20 @@ describe('role-based access', () => {
     expect(screen.getByRole('heading', { name: 'Approvals' })).toBeInTheDocument();
   });
 
+  it('highlights only Team today, not My team, on the /team/today screen', async () => {
+    installFetchMock({
+      ...signedIn({ team: [makeTeamMember()] }),
+      'GET /api/attendance/team/today': { status: 500, body: { message: 'Not needed here' } },
+    });
+
+    renderApp('/team/today');
+
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    const today = await within(nav).findByRole('link', { name: 'Team today' });
+    expect(today).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('link', { name: 'My team' })).not.toHaveAttribute('aria-current');
+  });
+
   it('shows HR both the administration and the team menus', async () => {
     installFetchMock({
       ...signedIn({ role: 'HR', team: [] }),

@@ -250,7 +250,20 @@ export function makeRunDetail(
       tax: 1527.92,
       netPay: 15751.26,
     },
-    payslips: [makePayslip({ runStatus: 'DRAFT' })],
+    ...overrides,
+  };
+}
+
+/** One page of the payslips of a run - the API serves them page by page. */
+export function makePayslipPage(
+  overrides: Partial<PageResponse<PayslipResponse>> = {},
+): PageResponse<PayslipResponse> {
+  return {
+    content: [makePayslip({ runStatus: 'DRAFT' })],
+    page: 0,
+    size: 50,
+    totalElements: 1,
+    totalPages: 1,
     ...overrides,
   };
 }
@@ -274,7 +287,7 @@ export function makeOrgNode(overrides: Partial<OrgChartNode> = {}): OrgChartNode
     fullName: 'Omar Said',
     jobTitle: 'Head of Finance',
     departmentName: 'Finance',
-    children: [],
+    childCount: 0,
     ...overrides,
   };
 }

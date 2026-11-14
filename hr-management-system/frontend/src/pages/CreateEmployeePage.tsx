@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { api } from '../api/api';
 import { ApiError, errorMessage } from '../api/ApiError';
-import type { CreatedEmployeeResponse, DepartmentResponse, EmployeeRecord, PageResponse, Role } from '../api/types';
+import type { CreatedEmployeeResponse, DepartmentResponse, Role } from '../api/types';
 import { isAdmin } from '../auth/roles';
 import { useAuth } from '../auth/useAuth';
 import { Banner } from '../components/Banner';
+import { ManagerCombobox } from '../components/ManagerCombobox';
 import { Field } from '../components/Field';
 import { describedBy } from '../components/describedBy';
 import { Modal } from '../components/Modal';
@@ -92,10 +93,6 @@ export function CreateEmployeePage(): JSX.Element {
   const departments = useResource<DepartmentResponse[]>(
     (signal) => api.listDepartments(signal),
     'departments-create',
-  );
-  const managers = useResource<PageResponse<EmployeeRecord>>(
-    (signal) => api.listEmployees({ status: 'ACTIVE', page: 0, size: 100, sort: 'fullName,asc' }, signal),
-    'managers-create',
   );
 
   const [fullName, setFullName] = useState('');
@@ -271,20 +268,14 @@ export function CreateEmployeePage(): JSX.Element {
               </select>
             </Field>
             <Field id="new-manager" label="Manager" error={errors.managerId}>
-              <select
+              <ManagerCombobox
                 id="new-manager"
                 value={managerId}
-                onChange={(event) => {
-                  setManagerId(event.target.value);
+                searchKey="managers-create"
+                onChange={(value) => {
+                  setManagerId(value);
                 }}
-              >
-                <option value="">No manager (org root)</option>
-                {(managers.data?.content ?? []).map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.fullName} · {employee.employeeNumber}
-                  </option>
-                ))}
-              </select>
+              />
             </Field>
           </div>
 

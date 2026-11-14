@@ -44,7 +44,8 @@ class PayrollController {
 
     @PostMapping("/runs")
     @Operation(summary = "HR/ADMIN: create the run for a month and snapshot every payslip; "
-            + "idempotent — a second call for the same month is 409 and creates nothing")
+            + "idempotent — a second call for the same month is 409 and creates nothing. "
+            + "The response carries the run and its totals; the payslips are paged separately.")
     ResponseEntity<PayrollRunDetailResponse> create(@Valid @RequestBody CreateRunBody body) {
         return ResponseEntity.status(HttpStatus.CREATED).body(payroll.createRun(body));
     }
@@ -57,9 +58,17 @@ class PayrollController {
     }
 
     @GetMapping("/runs/{runId}")
-    @Operation(summary = "HR/ADMIN: one run with its totals and every payslip")
+    @Operation(summary = "HR/ADMIN: one run with its totals (the payslips are paged separately)")
     PayrollRunDetailResponse get(@PathVariable UUID runId) {
         return payroll.getRun(runId);
+    }
+
+    @GetMapping("/runs/{runId}/payslips")
+    @Operation(summary = "HR/ADMIN: one page of the payslips of a run")
+    PageResponse<PayslipResponse> payslips(@PathVariable UUID runId,
+                                            @RequestParam(defaultValue = "0") int page,
+                                            @RequestParam(defaultValue = "50") int size) {
+        return payroll.payslipsPage(runId, page, size);
     }
 
     @PostMapping("/runs/{runId}/recalculate")

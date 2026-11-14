@@ -5,6 +5,7 @@ import { App } from './App';
 import { AuthProvider } from './auth/AuthProvider';
 import { ToastProvider } from './components/ToastProvider';
 import './styles.css';
+import './wink-theme.css';
 
 const container = document.getElementById('root');
 if (container === null) {

@@ -160,7 +160,8 @@ export interface OrgChartNode {
   fullName: string;
   jobTitle: string | null;
   departmentName: string | null;
-  children: OrgChartNode[];
+  /** How many direct reports this person has; their rows are fetched when the node is expanded. */
+  childCount: number;
 }
 
 export interface EmployeeQuery {
@@ -439,7 +440,6 @@ export interface PayslipResponse {
 export interface PayrollRunDetailResponse {
   run: PayrollRunResponse;
   totals: PayrollTotals;
-  payslips: PayslipResponse[];
 }
 
 export interface CreateRunBody {

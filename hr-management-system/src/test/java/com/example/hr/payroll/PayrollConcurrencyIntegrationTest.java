@@ -1,11 +1,13 @@
 package com.example.hr.payroll;
 
 import com.example.hr.employee.Role;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -14,6 +16,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * The real race: two HR users posting the same month at the same instant. The
@@ -98,5 +101,47 @@ class PayrollConcurrencyIntegrationTest extends AbstractPayrollIntegrationTest {
         assertThat(statuses).allMatch(status -> status == 201 || status == 409);
         assertThat(jdbc.queryForObject("select count(*) from payroll_runs", Long.class)).isEqualTo(1L);
         assertThat(jdbc.queryForObject("select count(*) from payslips", Long.class)).isEqualTo(3L);
+    }
+
+    @Test
+    void concurrentRecalculateAndFinalizeLeavesConsistentState() throws Exception {
+        for (int round = 0; round < 5; round++) {
+            // Delete any existing runs for March first so we can recreate
+            jdbc.execute("delete from payslips");
+            jdbc.execute("delete from payroll_runs");
+
+            JsonNode draft = createRunOk(hrToken, MONTH_YEAR, MONTH);
+            UUID runId = runIdOf(draft);
+
+            List<Callable<Integer>> tasks = new ArrayList<>();
+            // 4 recalculate requests and 1 finalize request all at once
+            for (int i = 0; i < 4; i++) {
+                tasks.add(() -> recalculate(hrToken, runId).andReturn().getResponse().getStatus());
+            }
+            tasks.add(() -> finalizeRun(adminToken, runId).andReturn().getResponse().getStatus());
+
+            List<Integer> statuses = inParallel(tasks);
+
+            // In all cases:
+            String status = jdbc.queryForObject("select status from payroll_runs where id = ?", String.class, runId);
+            Long payslips = jdbc.queryForObject("select count(*) from payslips where run_id = ?", Long.class, runId);
+            Long orphans = jdbc.queryForObject("""
+                    select count(*) from payslips p
+                     where not exists (select 1 from payroll_runs r where r.id = p.run_id)
+                    """, Long.class);
+
+            assertThat(orphans).isZero();
+            assertThat(payslips).isEqualTo(3L);
+            assertThat(status).isEqualTo("FINALIZED");
+            assertThat(statuses).contains(200);
+            // All non-200 statuses must be 409 Conflict
+            assertThat(statuses).allMatch(s -> s == 200 || s == 409);
+
+            // Verify that once FINALIZED, existing payslips are immutable and cannot be altered
+            List<UUID> finalizedSlipIds = jdbc.queryForList("select id from payslips where run_id = ?", UUID.class, runId);
+            recalculate(hrToken, runId).andExpect(status().isConflict());
+            List<UUID> postCheckSlipIds = jdbc.queryForList("select id from payslips where run_id = ?", UUID.class, runId);
+            assertThat(postCheckSlipIds).containsExactlyInAnyOrderElementsOf(finalizedSlipIds);
+        }
     }
 }

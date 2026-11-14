@@ -71,11 +71,18 @@ public abstract class AbstractPayrollIntegrationTest extends AbstractAttendanceI
     }
 
     protected JsonNode createRunOk(String token, int year, int month) throws Exception {
-        return body(createRun(token, year, month).andExpect(status().isCreated()));
+        JsonNode created = body(createRun(token, year, month).andExpect(status().isCreated()));
+        return withPayslips(token, UUID.fromString(created.path("run").path("id").asText()), created);
     }
 
     protected UUID runIdOf(JsonNode runDetail) {
         return UUID.fromString(runDetail.path("run").path("id").asText());
+    }
+
+    /** Recalculates a draft run and returns the payload with its payslips. */
+    protected JsonNode recalculateOk(String token, UUID runId) throws Exception {
+        JsonNode recalculated = body(recalculate(token, runId).andExpect(status().isOk()));
+        return withPayslips(token, runId, recalculated);
     }
 
     protected ResultActions recalculate(String token, UUID runId) throws Exception {
@@ -92,8 +99,34 @@ public abstract class AbstractPayrollIntegrationTest extends AbstractAttendanceI
         return mvc.perform(delete("/api/payroll/runs/" + runId).header("Authorization", bearer(token)));
     }
 
+    /**
+     * The run with its totals, plus every payslip under a "payslips" node.
+     *
+     * <p>The API serves the payslips page by page (a run over 20,000 employees has as many
+     * payslips, and returning them in one payload is what ran the API out of memory). The tests
+     * want them all, so this helper walks the pages and puts them back together.
+     */
     protected JsonNode runDetail(String token, UUID runId) throws Exception {
-        return body(getAs(token, "/api/payroll/runs/" + runId).andExpect(status().isOk()));
+        JsonNode detail = body(getAs(token, "/api/payroll/runs/" + runId).andExpect(status().isOk()));
+        return withPayslips(token, runId, detail);
+    }
+
+    /**
+     * Adds the payslips of a run to a run payload, walking the paged endpoint. The API serves
+     * them page by page (a run over 20,000 employees has as many payslips); the tests want them
+     * all in one place.
+     */
+    protected JsonNode withPayslips(String token, UUID runId, JsonNode detail) throws Exception {
+        com.fasterxml.jackson.databind.node.ArrayNode slips = json.createArrayNode();
+        int pages = 1;
+        for (int page = 0; page < pages; page++) {
+            JsonNode chunk = body(getAs(token, "/api/payroll/runs/" + runId + "/payslips?page=" + page
+                    + "&size=200").andExpect(status().isOk()));
+            pages = chunk.path("totalPages").asInt(1);
+            chunk.path("content").forEach(slips::add);
+        }
+        ((com.fasterxml.jackson.databind.node.ObjectNode) detail).set("payslips", slips);
+        return detail;
     }
 
     // ------------------------------------------------------------------ payslips

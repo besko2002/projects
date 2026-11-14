@@ -11,10 +11,13 @@ import com.example.hr.employee.Employee;
 import com.example.hr.employee.EmployeeRepository;
 import com.example.hr.security.CurrentEmployee;
 import com.example.hr.security.JwtService;
+import com.example.hr.security.SecurityEvent;
+import com.example.hr.security.SecurityEventService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Optional;
 
 /**
@@ -31,23 +34,34 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwt;
     private final CurrentEmployee currentEmployee;
-    private final LoginRateLimiter rateLimiter;
+    private final LoginThrottle rateLimiter;
+    private final SecurityEventService securityEvents;
     /** Checked against when the e-mail is unknown, so that path costs one BCrypt like the others. */
     private final String dummyHash;
 
     AuthService(EmployeeRepository employees, PasswordEncoder passwordEncoder, JwtService jwt,
-                CurrentEmployee currentEmployee, LoginRateLimiter rateLimiter) {
+                CurrentEmployee currentEmployee, LoginThrottle rateLimiter,
+                SecurityEventService securityEvents) {
         this.employees = employees;
         this.passwordEncoder = passwordEncoder;
         this.jwt = jwt;
         this.currentEmployee = currentEmployee;
         this.rateLimiter = rateLimiter;
+        this.securityEvents = securityEvents;
         this.dummyHash = passwordEncoder.encode("dummy-password-for-timing-equalization");
     }
 
     @Transactional(readOnly = true)
     public LoginResponse login(LoginRequest request, String clientIp) {
         String email = Employee.normalizeEmail(request.email());
+        // The account lock comes first: a locked account stays locked for every address.
+        Optional<Instant> lockedUntil = rateLimiter.lockedUntil(email);
+        if (lockedUntil.isPresent()) {
+            securityEvents.record(SecurityEvent.Type.ACCOUNT_LOCKED, email, clientIp,
+                    "Locked until " + lockedUntil.get());
+            throw new TooManyRequestsException("This account is temporarily locked after too many "
+                    + "failed sign-ins. Try again later.");
+        }
         if (rateLimiter.isBlocked(email, clientIp)) {
             throw new TooManyRequestsException("Too many failed login attempts. Try again later.");
         }
@@ -57,10 +71,14 @@ public class AuthService {
         // Unknown e-mail, wrong password and a terminated employee all get the same answer.
         if (found.isEmpty() || !matches || !found.get().isActive()) {
             rateLimiter.recordFailure(email, clientIp);
+            securityEvents.record(SecurityEvent.Type.LOGIN_FAILED, email, clientIp,
+                    "Wrong credentials or inactive account");
             throw new UnauthorizedException(INVALID_CREDENTIALS);
         }
         rateLimiter.reset(email, clientIp);
         Employee employee = found.get();
+        securityEvents.record(SecurityEvent.Type.LOGIN_SUCCEEDED, email, clientIp, employee.getId(),
+                "Signed in");
         return new LoginResponse(jwt.issue(employee), "Bearer", jwt.expiresInSeconds(),
                 AuthenticatedUser.of(employee));
     }
@@ -81,6 +99,8 @@ public class AuthService {
         }
         employee.setPassword(passwordEncoder.encode(request.newPassword()));
         Employee saved = employees.save(employee);
+        securityEvents.record(SecurityEvent.Type.PASSWORD_CHANGED, saved.getEmail(), null,
+                saved.getId(), "Password changed");
         return new PasswordChanged(AuthenticatedUser.of(saved), jwt.issue(saved));
     }
 }

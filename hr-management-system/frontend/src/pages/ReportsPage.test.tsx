@@ -25,6 +25,33 @@ afterEach(() => {
 });
 
 describe('reports', () => {
+  it('moves between tabs with arrow, Home and End keys while keeping one tab in the tab order', async () => {
+    const user = userEvent.setup();
+    installFetchMock(reportRoutes({
+      [`GET /api/reports/leave-summary?year=${String(YEAR)}`]: { body: [] },
+      [`GET /api/reports/attendance-summary?year=${String(YEAR)}&month=${String(MONTH)}`]: { body: [] },
+    }));
+    renderApp('/reports');
+
+    const headcount = await screen.findByRole('tab', { name: 'Headcount' });
+    headcount.focus();
+    await user.keyboard('{ArrowLeft}');
+    const attendance = screen.getByRole('tab', { name: 'Attendance summary' });
+    expect(attendance).toHaveFocus();
+    expect(attendance).toHaveAttribute('aria-selected', 'true');
+    expect(headcount).toHaveAttribute('tabindex', '-1');
+    expect(screen.getByRole('tabpanel', { name: 'Attendance summary' })).toBeInTheDocument();
+
+    await user.keyboard('{Home}');
+    expect(headcount).toHaveFocus();
+    await user.keyboard('{ArrowRight}');
+    const leave = screen.getByRole('tab', { name: 'Leave summary' });
+    expect(leave).toHaveFocus();
+    expect(leave).toHaveAttribute('tabindex', '0');
+    await user.keyboard('{End}');
+    expect(attendance).toHaveFocus();
+  });
+
   it('charts the headcount rows as an accessible table', async () => {
     const mock = installFetchMock(reportRoutes());
 

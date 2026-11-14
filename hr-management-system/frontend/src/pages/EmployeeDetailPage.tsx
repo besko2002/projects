@@ -6,19 +6,20 @@ import type {
   AuditChangeResponse,
   DepartmentResponse,
   EmployeeProfile,
-  EmployeeRecord,
   PageResponse,
   Role,
 } from '../api/types';
 import { isAdmin, readSalary } from '../auth/roles';
 import { useAuth } from '../auth/useAuth';
 import { Banner } from '../components/Banner';
+import { ManagerCombobox } from '../components/ManagerCombobox';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Field } from '../components/Field';
 import { describedBy } from '../components/describedBy';
 import { Pagination } from '../components/Pagination';
 import { Card, EmptyState, Loading, PageHeader } from '../components/states';
 import { StatusChip } from '../components/StatusChip';
+import { handleTabKeyDown } from '../components/tabKeyboard';
 import { useToast } from '../components/useToast';
 import { formatDate, formatDateTime, formatMoney, humanizeEnum } from '../lib/format';
 import { useResource } from '../lib/useResource';
@@ -49,11 +50,6 @@ export function EmployeeDetailPage(): JSX.Element {
   const departments = useResource<DepartmentResponse[]>(
     (signal) => api.listDepartments(signal),
     'departments-detail',
-  );
-  const candidates = useResource<PageResponse<EmployeeRecord>>(
-    (signal) =>
-      api.listEmployees({ status: 'ACTIVE', page: 0, size: 100, sort: 'fullName,asc' }, signal),
-    'manager-candidates',
   );
 
   const [editing, setEditing] = useState(false);
@@ -213,13 +209,14 @@ export function EmployeeDetailPage(): JSX.Element {
 
       {data !== null && (
         <>
-          <div className="tabs" role="tablist" aria-label="Employee sections">
+          <div className="tabs" role="tablist" aria-label="Employee sections" onKeyDown={handleTabKeyDown}>
             <button
               type="button"
               role="tab"
               id="tab-details"
               aria-selected={tab === 'details'}
               aria-controls="panel-details"
+              tabIndex={tab === 'details' ? 0 : -1}
               className={tab === 'details' ? 'tab tab-active' : 'tab'}
               onClick={() => {
                 setTab('details');
@@ -233,6 +230,7 @@ export function EmployeeDetailPage(): JSX.Element {
               id="tab-audit"
               aria-selected={tab === 'audit'}
               aria-controls="panel-audit"
+              tabIndex={tab === 'audit' ? 0 : -1}
               className={tab === 'audit' ? 'tab tab-active' : 'tab'}
               onClick={() => {
                 setTab('audit');
@@ -243,7 +241,7 @@ export function EmployeeDetailPage(): JSX.Element {
           </div>
 
           {tab === 'details' && (
-            <div id="panel-details" role="tabpanel" aria-labelledby="tab-details">
+            <div id="panel-details" role="tabpanel" aria-labelledby="tab-details" tabIndex={0}>
               <div className="grid grid-2">
                 <Card
                   title="Record"
@@ -436,23 +434,16 @@ export function EmployeeDetailPage(): JSX.Element {
                       </Banner>
                     )}
                     <Field id="set-manager" label="Reports to">
-                      <select
+                      <ManagerCombobox
                         id="set-manager"
                         value={data.managerId ?? ''}
+                        excludeId={data.id}
+                        searchKey={`manager-candidates-${data.id}`}
                         disabled={managerBusy}
-                        onChange={(event) => {
-                          void changeManager(event.target.value);
+                        onChange={(value) => {
+                          void changeManager(value);
                         }}
-                      >
-                        <option value="">No manager (org root)</option>
-                        {(candidates.data?.content ?? [])
-                          .filter((candidate) => candidate.id !== data.id)
-                          .map((candidate) => (
-                            <option key={candidate.id} value={candidate.id}>
-                              {candidate.fullName} · {candidate.employeeNumber}
-                            </option>
-                          ))}
-                      </select>
+                      />
                     </Field>
                     <p className="muted">
                       A move that would make somebody their own manager is refused by the server
@@ -493,7 +484,7 @@ export function EmployeeDetailPage(): JSX.Element {
           )}
 
           {tab === 'audit' && (
-            <div id="panel-audit" role="tabpanel" aria-labelledby="tab-audit">
+            <div id="panel-audit" role="tabpanel" aria-labelledby="tab-audit" tabIndex={0}>
               <Card title="Change history">
                 {audit.loading && <Loading label="Loading the audit trail…" />}
                 {audit.error !== null && <Banner>{audit.error}</Banner>}

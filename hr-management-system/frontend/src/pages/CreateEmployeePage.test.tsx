@@ -34,6 +34,57 @@ async function fillRequiredFields(): Promise<void> {
 }
 
 describe('create employee', () => {
+  it('searches for a manager and posts the chosen one', async () => {
+    const user = userEvent.setup();
+    const mock = installFetchMock(createRoutes({
+      'GET /api/employees': {
+        body: makePage([makeEmployee({ id: 'emp-101', fullName: 'Last Manager', employeeNumber: 'EMP-0101' })],
+          { page: 0, size: 20, totalElements: 1, totalPages: 1 }),
+      },
+    }));
+
+    renderApp('/employees/new');
+    const input = await screen.findByRole('combobox', { name: /^manager/i });
+    await user.type(input, 'Last');
+
+    const option = await screen.findByRole('option', { name: 'Last Manager · EMP-0101' });
+    await user.click(option);
+    await fillRequiredFields();
+    await user.click(screen.getByRole('button', { name: 'Create employee' }));
+
+    expect(mock.callsTo('POST /api/employees')[0].body).toMatchObject({ managerId: 'emp-101' });
+    // The picker searches instead of loading the whole roster: one request, with the typed text.
+    expect(mock.urlsFor('GET', '/api/employees')).toEqual([
+      '/api/employees?q=Last&status=ACTIVE&page=0&size=20&sort=fullName%2Casc',
+    ]);
+  });
+
+  it('keeps "No manager (org root)" available', async () => {
+    const user = userEvent.setup();
+    installFetchMock(createRoutes());
+
+    renderApp('/employees/new');
+    const input = await screen.findByRole('combobox', { name: /^manager/i });
+    await user.click(input);
+
+    expect(await screen.findByRole('option', { name: 'No manager (org root)' })).toBeInTheDocument();
+  });
+
+  it('shows the search failure and offers a retry', async () => {
+    const user = userEvent.setup();
+    installFetchMock(createRoutes({
+      'GET /api/employees': { status: 500, body: { message: 'Search unavailable' } },
+    }));
+
+    renderApp('/employees/new');
+    const input = await screen.findByRole('combobox', { name: /^manager/i });
+    await user.type(input, 'Zoe');
+
+    expect(await screen.findByText('Search unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
   it('posts the typed record and shows the temporary password once', async () => {
     const user = userEvent.setup();
     const mock = installFetchMock(createRoutes());

@@ -7,9 +7,9 @@ import org.apache.poi.ss.usermodel.DataFormat;
 import org.apache.poi.ss.usermodel.Font;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.util.CellReference;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.xssf.streaming.SXSSFWorkbook;
+import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,7 +17,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -52,9 +51,9 @@ public class PayrollExcelExporter {
     @Transactional(readOnly = true)
     public byte[] export(UUID runId) {
         PayrollRun run = payroll.requireRunForExport(runId);
-        List<Payslip> slips = payroll.payslipsOf(run.getId());
 
-        try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+        SXSSFWorkbook workbook = new SXSSFWorkbook(100);
+        try (workbook; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("Payroll " + run.period());
             DataFormat formats = workbook.createDataFormat();
 
@@ -78,39 +77,51 @@ public class PayrollExcelExporter {
             }
 
             int rowIndex = 1;
-            for (Payslip slip : slips) {
-                Row row = sheet.createRow(rowIndex++);
-                int column = 0;
-                row.createCell(column++).setCellValue(slip.getEmployeeNumber());
-                row.createCell(column++).setCellValue(slip.getEmployeeName());
-                row.createCell(column++).setCellValue(
-                        slip.getDepartmentName() == null ? "" : slip.getDepartmentName());
-                amount(row, column++, slip.getBaseSalary(), money);
-                row.createCell(column++).setCellValue(slip.getWorkingDaysInMonth());
-                row.createCell(column++).setCellValue(slip.getPayableWorkingDays());
-                row.createCell(column++).setCellValue(slip.getUnpaidLeaveDays());
-                row.createCell(column++).setCellValue(slip.getAbsentDays());
-                row.createCell(column++).setCellValue(slip.getLateMinutes());
-                amount(row, column++, slip.getOvertimeHours(), money);
-                amount(row, column++, slip.getHolidayHours(), money);
-                amount(row, column++, slip.getProratedBase(), money);
-                amount(row, column++, slip.getOvertimePay(), money);
-                amount(row, column++, slip.getHolidayPay(), money);
-                amount(row, column++, slip.getUnpaidLeaveDeduction(), money);
-                amount(row, column++, slip.getAbsenceDeduction(), money);
-                amount(row, column++, slip.getGrossEarnings(), money);
-                amount(row, column++, slip.getInsurableWage(), money);
-                amount(row, column++, slip.getInsurance(), money);
-                amount(row, column++, slip.getTaxableIncome(), money);
-                amount(row, column++, slip.getTax(), money);
-                amount(row, column, slip.getNetPay(), money);
+            int page = 0;
+            int batchSize = 500;
+            int totalEmployees = 0;
+
+            while (true) {
+                Page<Payslip> batch = payroll.payslipsBatch(run.getId(), page, batchSize);
+                for (Payslip slip : batch.getContent()) {
+                    totalEmployees++;
+                    Row row = sheet.createRow(rowIndex++);
+                    int column = 0;
+                    row.createCell(column++).setCellValue(slip.getEmployeeNumber());
+                    row.createCell(column++).setCellValue(slip.getEmployeeName());
+                    row.createCell(column++).setCellValue(
+                            slip.getDepartmentName() == null ? "" : slip.getDepartmentName());
+                    amount(row, column++, slip.getBaseSalary(), money);
+                    row.createCell(column++).setCellValue(slip.getWorkingDaysInMonth());
+                    row.createCell(column++).setCellValue(slip.getPayableWorkingDays());
+                    row.createCell(column++).setCellValue(slip.getUnpaidLeaveDays());
+                    row.createCell(column++).setCellValue(slip.getAbsentDays());
+                    row.createCell(column++).setCellValue(slip.getLateMinutes());
+                    amount(row, column++, slip.getOvertimeHours(), money);
+                    amount(row, column++, slip.getHolidayHours(), money);
+                    amount(row, column++, slip.getProratedBase(), money);
+                    amount(row, column++, slip.getOvertimePay(), money);
+                    amount(row, column++, slip.getHolidayPay(), money);
+                    amount(row, column++, slip.getUnpaidLeaveDeduction(), money);
+                    amount(row, column++, slip.getAbsenceDeduction(), money);
+                    amount(row, column++, slip.getGrossEarnings(), money);
+                    amount(row, column++, slip.getInsurableWage(), money);
+                    amount(row, column++, slip.getInsurance(), money);
+                    amount(row, column++, slip.getTaxableIncome(), money);
+                    amount(row, column++, slip.getTax(), money);
+                    amount(row, column, slip.getNetPay(), money);
+                }
+                if (batch.isLast() || batch.isEmpty()) {
+                    break;
+                }
+                page++;
             }
 
             Row totals = sheet.createRow(rowIndex);
             Cell label = totals.createCell(0);
-            label.setCellValue("TOTAL (" + slips.size() + " employees)");
+            label.setCellValue("TOTAL (" + totalEmployees + " employees)");
             label.setCellStyle(bold);
-            if (!slips.isEmpty()) {
+            if (totalEmployees > 0) {
                 for (int column : SUMMED) {
                     String letter = CellReference.convertNumToColString(column);
                     Cell cell = totals.createCell(column, CellType.FORMULA);
@@ -126,6 +137,8 @@ public class PayrollExcelExporter {
             return out.toByteArray();
         } catch (IOException ex) {
             throw new UncheckedIOException("Could not write the payroll workbook", ex);
+        } finally {
+            workbook.dispose();
         }
     }
 

@@ -16,6 +16,14 @@ import java.time.Instant;
 @Service
 public class JwtService {
 
+    /**
+     * Claim carrying the employee's token version. The resource server compares it with the
+     * version stored in the database, so a password change invalidates every token issued
+     * before it - even one issued in the same second, which a timestamp comparison cannot
+     * tell apart.
+     */
+    public static final String TOKEN_VERSION_CLAIM = "ver";
+
     private final JwtEncoder encoder;
     private final Duration lifetime;
 
@@ -33,6 +41,7 @@ public class JwtService {
                 .expiresAt(now.plus(lifetime))
                 .claim("role", employee.getRole().name())
                 .claim("email", employee.getEmail())
+                .claim(TOKEN_VERSION_CLAIM, employee.getTokenVersion())
                 .build();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
         return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();

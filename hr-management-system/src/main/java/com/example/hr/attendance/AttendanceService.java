@@ -14,6 +14,7 @@ import com.example.hr.employee.Employee;
 import com.example.hr.employee.EmployeeRepository;
 import com.example.hr.employee.EmployeeStatus;
 import com.example.hr.security.CurrentEmployee;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -58,6 +59,13 @@ public class AttendanceService {
 
     private static final Duration MAX_SESSION = Duration.ofHours(24);
 
+    /**
+     * The partial unique index that allows only one open session per employee and work day
+     * (migration V8). Its name shows up in the database error, which is how a losing insert is
+     * told apart from any other integrity violation.
+     */
+    private static final String OPEN_SESSION_GUARD = "attendance_sessions_one_open_per_day_idx";
+
     private final AttendanceSessionRepository sessions;
     private final AttendanceDeriver deriver;
     private final WorkCalendar calendar;
@@ -89,7 +97,37 @@ public class AttendanceService {
         if (sessions.findOpenOn(me.getId(), workDate).isPresent()) {
             throw new ConflictException("You already have an open attendance session today; check out first");
         }
-        return toSession(sessions.save(AttendanceSession.selfCheckIn(me, now, rules.zone())), rules.zone());
+        try {
+            // saveAndFlush, so the database guard (one open session per employee and work day)
+            // is checked here and not at commit time: a concurrent check-in that slipped past
+            // the check above fails on the insert and becomes a 409 instead of a second open
+            // session.
+            return toSession(sessions.saveAndFlush(AttendanceSession.selfCheckIn(me, now, rules.zone())),
+                    rules.zone());
+        } catch (DataIntegrityViolationException ex) {
+            if (!causedByOpenSessionGuard(ex)) {
+                throw ex;
+            }
+            throw new ConflictException("You already have an open attendance session today; check out first");
+        }
+    }
+
+    /**
+     * True when the failure is the partial unique index that allows only one open session per
+     * employee and work day. Any other integrity violation is a bug and is rethrown unchanged
+     * instead of being reported as a duplicate check-in.
+     *
+     * @param ex the failure raised while inserting the session
+     * @return whether it is the open-session guard
+     */
+    private static boolean causedByOpenSessionGuard(DataIntegrityViolationException ex) {
+        for (Throwable cause = ex; cause != null; cause = cause.getCause()) {
+            String message = cause.getMessage();
+            if (message != null && message.contains(OPEN_SESSION_GUARD)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Transactional

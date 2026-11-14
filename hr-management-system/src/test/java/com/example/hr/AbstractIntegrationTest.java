@@ -35,7 +35,10 @@ public abstract class AbstractIntegrationTest {
 
     @SuppressWarnings("resource")
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
-            .withDatabaseName("hr").withUsername("hr").withPassword("hr");
+            .withDatabaseName("hr").withUsername("hr")
+            // Strong enough for the application's own password policy (the production default
+            // used to be the one-word "hr", which is exactly what the policy now rejects).
+            .withPassword("test-only-hr-db-password");
 
     static {
         POSTGRES.start();

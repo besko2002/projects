@@ -74,23 +74,6 @@ class HierarchyIntegrationTest extends AbstractIntegrationTest {
         throw new AssertionError("no node named " + fullName + " in " + array);
     }
 
-    /** Names of the direct children only (findValuesAsText would recurse into grandchildren). */
-    private static List<String> childNames(JsonNode node) {
-        List<String> names = new ArrayList<>();
-        for (JsonNode child : node.path("children")) {
-            names.add(child.path("fullName").asText());
-        }
-        return names;
-    }
-
-    private static int countNodes(JsonNode nodes) {
-        int total = 0;
-        for (JsonNode node : nodes) {
-            total += 1 + countNodes(node.path("children"));
-        }
-        return total;
-    }
-
     private static List<String> namesWithDepth(JsonNode team, int depth) {
         List<String> names = new ArrayList<>();
         for (JsonNode member : team) {
@@ -160,7 +143,9 @@ class HierarchyIntegrationTest extends AbstractIntegrationTest {
 
         JsonNode roots = body(getAs(admin, "/api/org-chart"));
         assertThat(roots.findValuesAsText("fullName")).contains("Dirk Director");
-        assertThat(nodeNamed(roots, "Dirk Director").path("children").size()).isEqualTo(1);
+        assertThat(nodeNamed(roots, "Dirk Director").path("childCount").asInt()).isEqualTo(1);
+        JsonNode dirkChildren = body(getAs(admin, "/api/org-chart/" + director.id() + "/children"));
+        assertThat(dirkChildren.findValuesAsText("fullName")).containsExactly("Mary Manager");
     }
 
     @Test
@@ -258,18 +243,29 @@ class HierarchyIntegrationTest extends AbstractIntegrationTest {
         assertThat(roots.size()).isEqualTo(2);
         JsonNode ceoNode = nodeNamed(roots, "Cora Ceo");
         assertThat(ceoNode.path("jobTitle").asText()).isEqualTo("Cora Ceo title");
-        assertThat(ceoNode.path("children").size()).isEqualTo(2);
+        assertThat(ceoNode.path("childCount").asInt()).isEqualTo(2);
 
-        JsonNode directorNode = nodeNamed(ceoNode.path("children"), "Dirk Director");
-        JsonNode managerNode = nodeNamed(directorNode.path("children"), "Mary Manager");
-        assertThat(managerNode.path("children").size()).isEqualTo(2);
-        assertThat(childNames(managerNode)).containsExactlyInAnyOrder("Stan Staff", "Sara Staff");
-        assertThat(childNames(nodeNamed(ceoNode.path("children"), "Diana Director")))
-                .containsExactly("Mike Manager");
-        assertThat(childNames(ceoNode)).containsExactlyInAnyOrder("Dirk Director", "Diana Director");
+        JsonNode ceoChildren = body(getAs(staffToken, "/api/org-chart/" + ceo.id() + "/children"));
+        assertThat(ceoChildren.size()).isEqualTo(2);
+        assertThat(ceoChildren.findValuesAsText("fullName")).containsExactlyInAnyOrder("Dirk Director", "Diana Director");
 
-        assertThat(countNodes(roots)).isEqualTo(8);
+        JsonNode dirkNode = nodeNamed(ceoChildren, "Dirk Director");
+        assertThat(dirkNode.path("childCount").asInt()).isEqualTo(1);
+
+        JsonNode dirkChildren = body(getAs(staffToken, "/api/org-chart/" + director.id() + "/children"));
+        JsonNode managerNode = nodeNamed(dirkChildren, "Mary Manager");
+        assertThat(managerNode.path("childCount").asInt()).isEqualTo(2);
+
+        JsonNode managerChildren = body(getAs(staffToken, "/api/org-chart/" + manager.id() + "/children"));
+        assertThat(managerChildren.findValuesAsText("fullName")).containsExactlyInAnyOrder("Stan Staff", "Sara Staff");
+
+        JsonNode dianaChildren = body(getAs(staffToken, "/api/org-chart/" + siblingDirector.id() + "/children"));
+        assertThat(dianaChildren.findValuesAsText("fullName")).containsExactly("Mike Manager");
+
         assertThat(roots.toString()).doesNotContain("salary").doesNotContain("email");
+        assertThat(ceoChildren.toString()).doesNotContain("salary").doesNotContain("email");
+        assertThat(dirkChildren.toString()).doesNotContain("salary").doesNotContain("email");
+        assertThat(managerChildren.toString()).doesNotContain("salary").doesNotContain("email");
     }
 
     @Test
@@ -285,14 +281,14 @@ class HierarchyIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk());
 
         JsonNode roots = body(getAs(admin, "/api/org-chart"));
-        JsonNode ceoNode = nodeNamed(roots, "Cora Ceo");
-        assertThat(nodeNamed(nodeNamed(ceoNode.path("children"), "Dirk Director").path("children"),
-                "Mary Manager").path("departmentName").asText()).isEqualTo("Engineering");
+        JsonNode dirkChildren = body(getAs(admin, "/api/org-chart/" + director.id() + "/children"));
+        assertThat(nodeNamed(dirkChildren, "Mary Manager").path("departmentName").asText()).isEqualTo("Engineering");
 
         // Diana is gone and her report was re-parented to the CEO.
+        JsonNode ceoChildren = body(getAs(admin, "/api/org-chart/" + ceo.id() + "/children"));
         assertThat(roots.toString()).doesNotContain("Diana Director");
-        assertThat(childNames(ceoNode)).containsExactlyInAnyOrder("Dirk Director", "Mike Manager");
-        assertThat(countNodes(roots)).isEqualTo(7);
+        assertThat(ceoChildren.toString()).doesNotContain("Diana Director");
+        assertThat(ceoChildren.findValuesAsText("fullName")).containsExactlyInAnyOrder("Dirk Director", "Mike Manager");
     }
 
     @Test
@@ -317,15 +313,22 @@ class HierarchyIntegrationTest extends AbstractIntegrationTest {
         assertThat(employees).isEqualTo(8 + created);
 
         JsonNode roots = body(getAs(admin, "/api/org-chart").andExpect(status().isOk()));
-        assertThat(countNodes(roots)).isEqualTo((int) employees);
+        assertThat(roots.size()).isEqualTo(2);
 
-        // The deepest branch is still nested correctly: ceo -> director -> manager -> staff -> L0 -> L1.
-        JsonNode node = nodeNamed(roots, "Cora Ceo");
-        for (String name : List.of("Dirk Director", "Mary Manager", "Stan Staff")) {
-            node = nodeNamed(node.path("children"), name);
-        }
-        assertThat(node.path("children").size()).isEqualTo(3);
-        assertThat(node.path("children").get(0).path("children").size()).isEqualTo(2);
+        // The deepest branch is still resolved level-by-level: ceo -> director -> manager -> staff -> L0 -> L1.
+        JsonNode ceoChildren = body(getAs(admin, "/api/org-chart/" + ceo.id() + "/children"));
+        JsonNode dirkChildren = body(getAs(admin, "/api/org-chart/" + director.id() + "/children"));
+        JsonNode managerChildren = body(getAs(admin, "/api/org-chart/" + manager.id() + "/children"));
+        JsonNode stanNode = nodeNamed(managerChildren, "Stan Staff");
+        assertThat(stanNode.path("childCount").asInt()).isEqualTo(3);
+
+        JsonNode stanChildren = body(getAs(admin, "/api/org-chart/" + staff.id() + "/children"));
+        assertThat(stanChildren.size()).isEqualTo(3);
+        UUID l0ChildId = UUID.fromString(stanChildren.get(0).path("id").asText());
+        assertThat(stanChildren.get(0).path("childCount").asInt()).isEqualTo(2);
+
+        JsonNode l1Children = body(getAs(admin, "/api/org-chart/" + l0ChildId + "/children"));
+        assertThat(l1Children.size()).isEqualTo(2);
     }
 
     @Test

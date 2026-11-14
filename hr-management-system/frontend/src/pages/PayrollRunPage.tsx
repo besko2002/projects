@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api/api';
 import { errorMessage } from '../api/ApiError';
-import type { PayrollRunDetailResponse, PayslipResponse } from '../api/types';
+import type { PageResponse, PayrollRunDetailResponse, PayslipResponse } from '../api/types';
 import { Banner } from '../components/Banner';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Card, EmptyState, Loading, PageHeader } from '../components/states';
@@ -24,6 +24,14 @@ export function PayrollRunPage(): JSX.Element {
     `payroll-run-${runId}`,
   );
 
+  // The payslips are served page by page: a run over 20,000 employees has as many payslips, and
+  // returning them in one payload is what ran the API out of memory.
+  const [page, setPage] = useState(0);
+  const payslips = useResource<PageResponse<PayslipResponse>>(
+    (signal) => api.payrollRunPayslips(runId, page, 50, signal),
+    `payroll-run-payslips-${runId}-${page}`,
+  );
+
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState<Pending>(null);
@@ -39,6 +47,8 @@ export function PayrollRunPage(): JSX.Element {
     try {
       const updated = await api.recalculatePayrollRun(runId);
       detail.setData(updated);
+      setPage(0);
+      payslips.reload();
       toast.success('Payroll run recalculated.');
     } catch (cause) {
       // 409 once the run is FINALIZED.
@@ -207,10 +217,47 @@ export function PayrollRunPage(): JSX.Element {
             </dl>
           </Card>
 
-          <Card title="Payslips">
-            {data.payslips.length === 0 ? (
+          <Card
+            title="Payslips"
+            actions={
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="button button-small"
+                  disabled={payslips.loading || payslips.data === null || payslips.data.page === 0}
+                  onClick={() => {
+                    setPage((current) => Math.max(0, current - 1));
+                  }}
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  className="button button-small"
+                  disabled={
+                    payslips.loading ||
+                    payslips.data === null ||
+                    payslips.data.page + 1 >= payslips.data.totalPages
+                  }
+                  onClick={() => {
+                    setPage((current) =>
+                      payslips.data !== null
+                        ? Math.min(payslips.data.totalPages - 1, current + 1)
+                        : current,
+                    );
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+            }
+          >
+            {payslips.loading && <Loading label="Loading the payslips…" />}
+            {payslips.error !== null && <Banner>{payslips.error}</Banner>}
+            {payslips.data !== null && payslips.data.totalElements === 0 && (
               <EmptyState title="This run has no payslip." />
-            ) : (
+            )}
+            {payslips.data !== null && payslips.data.content.length > 0 && (
               <table className="table">
                 <caption className="sr-only">Payslips in this run</caption>
                 <thead>
@@ -228,7 +275,7 @@ export function PayrollRunPage(): JSX.Element {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.payslips.map((payslip) => (
+                  {(payslips.data?.content ?? []).map((payslip) => (
                     <tr key={payslip.id}>
                       <th scope="row">
                         {payslip.employeeName}
@@ -257,6 +304,12 @@ export function PayrollRunPage(): JSX.Element {
                   ))}
                 </tbody>
               </table>
+            )}
+            {payslips.data !== null && payslips.data.totalElements > 0 && (
+              <p className="muted">
+                Page {payslips.data.page + 1} of {Math.max(payslips.data.totalPages, 1)} ·{' '}
+                {payslips.data.totalElements} payslip{payslips.data.totalElements === 1 ? '' : 's'}
+              </p>
             )}
           </Card>
         </>

@@ -5,7 +5,10 @@ spring:
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5437/hr}
     username: ${DB_USERNAME:hr}
-    password: ${DB_PASSWORD:hr}
+    # No default: the password has to be configured explicitly (see .env.example). The
+    # application refuses to start with a missing or placeholder password - see
+    # DatabasePasswordPolicy.
+    password: ${DB_PASSWORD:}
     driver-class-name: org.postgresql.Driver
     hikari:
       pool-name: hr-pool
@@ -40,6 +43,12 @@ management:
       show-details: when-authorized
       probes:
         enabled: true
+  health:
+    redis:
+      # Only meaningful when Redis is actually used (LOGIN_RATE_LIMIT_STORE=redis); with the
+      # in-memory store there is no Redis to probe, and a missing one must not make the whole
+      # application look unhealthy.
+      enabled: ${REDIS_HEALTH_ENABLED:false}
 
 springdoc:
   # Off unless SPRINGDOC_ENABLED=true (set it for local development, see .env.example).
@@ -61,9 +70,17 @@ app:
     email: ${HR_ADMIN_EMAIL:admin@hr.local}
     password: ${HR_ADMIN_PASSWORD:}
   login-rate-limit:
+    # Where the counters live: "memory" (per instance - the default, right for a single
+    # instance and for the tests) or "redis" (shared, right when the stack runs more than one
+    # instance). With "redis" the compose file has to bring the rate-limit profile up.
+    store: ${LOGIN_RATE_LIMIT_STORE:memory}
     # Failed logins allowed per (e-mail, client IP) within the window before 429.
     max-failures: ${LOGIN_MAX_FAILURES:5}
     window: ${LOGIN_FAILURE_WINDOW:PT15M}
+    # After this many failures the ACCOUNT itself is locked (for every client address). The lock
+    # unlocks itself when the duration is over.
+    lockout-after-failures: ${LOGIN_LOCKOUT_AFTER_FAILURES:10}
+    lockout-duration: ${LOGIN_LOCKOUT_DURATION:PT15M}
   employees:
     max-page-size: 100
   leave:

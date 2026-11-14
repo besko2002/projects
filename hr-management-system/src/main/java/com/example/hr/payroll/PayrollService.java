@@ -18,11 +18,14 @@ import com.example.hr.payroll.PayrollDtos.PayslipResponse;
 import com.example.hr.security.CurrentEmployee;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityManager;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -61,6 +64,12 @@ import java.util.UUID;
 @Service
 public class PayrollService {
 
+    /** How many employees are written per batch. Small enough to stay cheap, big enough to fly. */
+    private static final int PAYSLIP_BATCH_SIZE = 500;
+
+    /** Keyset pagination starts after this id - it is smaller than any generated UUID. */
+    private static final UUID FIRST_BATCH = new UUID(0L, 0L);
+
     private final PayrollRunRepository runs;
     private final PayslipRepository payslips;
     private final EmployeeRepository employees;
@@ -72,11 +81,12 @@ public class PayrollService {
     private final CurrentEmployee currentEmployee;
     private final ObjectMapper json;
     private final Clock clock;
+    private final EntityManager entityManager;
 
     PayrollService(PayrollRunRepository runs, PayslipRepository payslips, EmployeeRepository employees,
                    AttendanceDeriver attendance, WorkCalendar calendar, PayrollCalculator calculator,
                    PayrollRates rates, EmployeeAccessPolicy policy, CurrentEmployee currentEmployee,
-                   ObjectMapper json, Clock clock) {
+                   ObjectMapper json, Clock clock, EntityManager entityManager) {
         this.runs = runs;
         this.payslips = payslips;
         this.employees = employees;
@@ -88,6 +98,7 @@ public class PayrollService {
         this.currentEmployee = currentEmployee;
         this.json = json;
         this.clock = clock;
+        this.entityManager = entityManager;
     }
 
     // ------------------------------------------------------------------ run lifecycle
@@ -114,8 +125,8 @@ public class PayrollService {
             throw new ConflictException("A payroll run for " + period + " already exists");
         }
 
-        List<Payslip> created = buildPayslips(run);
-        return detail(run, created);
+        PayrollTotals totals = buildPayslips(run);
+        return new PayrollRunDetailResponse(toRun(run), totals);
     }
 
     @Transactional
@@ -123,10 +134,11 @@ public class PayrollService {
         policy.requireHrOrAdmin(currentEmployee.require(), "recalculate a payroll run");
         PayrollRun run = requireRun(runId);
         run.requireDraft("recalculated");
+        runs.saveAndFlush(run);
 
         payslips.deleteByRunId(run.getId());
         payslips.flush();
-        return detail(run, buildPayslips(run));
+        return new PayrollRunDetailResponse(toRun(run), buildPayslips(run));
     }
 
     @Transactional
@@ -164,7 +176,38 @@ public class PayrollService {
     public PayrollRunDetailResponse getRun(UUID runId) {
         policy.requireHrOrAdmin(currentEmployee.require(), "view a payroll run");
         PayrollRun run = requireRun(runId);
-        return detail(run, payslips.findByRun(run.getId()));
+        return new PayrollRunDetailResponse(toRun(run), totalsOf(run.getId()));
+    }
+
+    /**
+     * One page of the payslips of a run. A run over 20,000 employees has as many payslips, so
+     * they are served page by page instead of in one response.
+     *
+     * @param runId the run whose payslips are asked for
+     * @param page  the zero-based page
+     * @param size  the page size (capped)
+     * @return the page of payslips
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<PayslipResponse> payslipsPage(UUID runId, int page, int size) {
+        policy.requireHrOrAdmin(currentEmployee.require(), "view a payroll run");
+        PayrollRun run = requireRun(runId);
+        int resolved = size < 1 ? 50 : Math.min(size, 200);
+        return PageResponse.of(
+                payslips.findByRunPaged(run.getId(), PageRequest.of(Math.max(page, 0), resolved)),
+                this::toPayslip);
+    }
+
+    /** The company-level sums of a run, read from the database. */
+    @Transactional(readOnly = true)
+    public PayrollTotals totalsOf(UUID runId) {
+        PayslipRepository.RunTotals sums = payslips.sumOfRun(runId);
+        return new PayrollTotals((int) sums.getPayslipCount(), Money.scaled(sums.getBaseSalary()),
+                Money.scaled(sums.getProratedBase()), Money.scaled(sums.getOvertimePay()),
+                Money.scaled(sums.getHolidayPay()), Money.scaled(sums.getUnpaidLeaveDeduction()),
+                Money.scaled(sums.getAbsenceDeduction()), Money.scaled(sums.getGrossEarnings()),
+                Money.scaled(sums.getInsurance()), Money.scaled(sums.getTax()),
+                Money.scaled(sums.getNetPay()));
     }
 
     @Transactional(readOnly = true)
@@ -209,53 +252,86 @@ public class PayrollService {
         return payslips.findByRun(runId);
     }
 
+    @Transactional(readOnly = true)
+    public Page<Payslip> payslipsBatch(UUID runId, int page, int size) {
+        policy.requireHrOrAdmin(currentEmployee.require(), "export a payroll run");
+        return payslips.findByRunPaged(runId, PageRequest.of(Math.max(0, page), Math.max(1, size)));
+    }
+
     // ------------------------------------------------------------------ the run itself
 
-    private List<Payslip> buildPayslips(PayrollRun run) {
+    /**
+     * Writes the payslips of a run, in batches.
+     *
+     * <p>The employees are walked with keyset pagination, the attendance of a batch is derived
+     * and the batch is written and flushed before the next one is read. Nothing but the current
+     * batch is ever in memory, which is what makes a 20,000-employee run possible: the old
+     * version held every employee, every derived day and every payslip at once, and the API ran
+     * out of memory. The run stays atomic - the whole thing is one transaction, so a failure
+     * anywhere leaves no run and no payslips behind.
+     *
+     * @param run the run the payslips belong to
+     * @return the totals of the run, accumulated while writing
+     */
+    private PayrollTotals buildPayslips(PayrollRun run) {
         YearMonth period = run.period();
         LocalDate monthStart = period.atDay(1);
         LocalDate monthEnd = period.atEndOfMonth();
 
-        List<Employee> eligible = employees.findPayrollEligible(monthStart, monthEnd);
         Set<LocalDate> holidays = calendar.holidaysBetween(monthStart, monthEnd);
         int workingDaysInMonth = calendar.workingDaysBetween(monthStart, monthEnd, holidays);
-        Map<UUID, List<DailyAttendance>> derived = attendance.deriveAll(eligible, monthStart, monthEnd);
         Instant now = now();
+        Totals totals = new Totals();
 
-        List<Payslip> created = new ArrayList<>();
-        for (Employee employee : eligible) {
-            LocalDate windowStart = max(monthStart, employee.getHireDate());
-            LocalDate windowEnd = employee.getTerminatedAt() == null
-                    ? monthEnd : min(monthEnd, employee.getTerminatedAt());
-            int payableDays = windowEnd.isBefore(windowStart)
-                    ? 0 : calendar.workingDaysBetween(windowStart, windowEnd, holidays);
-
-            int unpaidLeaveDays = 0;
-            int absentDays = 0;
-            int lateMinutes = 0;
-            int overtimeMinutes = 0;
-            int holidayMinutes = 0;
-            for (DailyAttendance day : derived.getOrDefault(employee.getId(), List.of())) {
-                if (day.isUnpaidLeaveDay()) {
-                    unpaidLeaveDays++;
-                }
-                if (day.isAbsentDay()) {
-                    absentDays++;
-                }
-                lateMinutes += day.lateMinutes();
-                overtimeMinutes += day.weekdayOvertimeMinutes();
-                holidayMinutes += day.restDayMinutes();
+        UUID after = FIRST_BATCH;
+        while (true) {
+            List<Employee> batch = employees.findPayrollEligibleBatch(monthStart, monthEnd, after,
+                    PageRequest.of(0, PAYSLIP_BATCH_SIZE));
+            if (batch.isEmpty()) {
+                break;
             }
+            after = batch.get(batch.size() - 1).getId();
+            Map<UUID, List<DailyAttendance>> derived = attendance.deriveAll(batch, monthStart, monthEnd);
 
-            PayrollInput input = new PayrollInput(employee.getSalary(), workingDaysInMonth,
-                    Math.min(payableDays, workingDaysInMonth), unpaidLeaveDays, absentDays, lateMinutes,
-                    overtimeMinutes, holidayMinutes, rates);
-            PayrollResult result = calculator.calculate(input);
-            created.add(payslips.save(new Payslip(run, employee, result,
-                    writeSnapshot(period, monthStart, monthEnd, result), now)));
+            for (Employee employee : batch) {
+                LocalDate windowStart = max(monthStart, employee.getHireDate());
+                LocalDate windowEnd = employee.getTerminatedAt() == null
+                        ? monthEnd : min(monthEnd, employee.getTerminatedAt());
+                int payableDays = windowEnd.isBefore(windowStart)
+                        ? 0 : calendar.workingDaysBetween(windowStart, windowEnd, holidays);
+
+                int unpaidLeaveDays = 0;
+                int absentDays = 0;
+                int lateMinutes = 0;
+                int overtimeMinutes = 0;
+                int holidayMinutes = 0;
+                for (DailyAttendance day : derived.getOrDefault(employee.getId(), List.of())) {
+                    if (day.isUnpaidLeaveDay()) {
+                        unpaidLeaveDays++;
+                    }
+                    if (day.isAbsentDay()) {
+                        absentDays++;
+                    }
+                    lateMinutes += day.lateMinutes();
+                    overtimeMinutes += day.weekdayOvertimeMinutes();
+                    holidayMinutes += day.restDayMinutes();
+                }
+
+                PayrollInput input = new PayrollInput(employee.getSalary(), workingDaysInMonth,
+                        Math.min(payableDays, workingDaysInMonth), unpaidLeaveDays, absentDays,
+                        lateMinutes, overtimeMinutes, holidayMinutes, rates);
+                PayrollResult result = calculator.calculate(input);
+                totals.add(payslips.save(new Payslip(run, employee, result,
+                        writeSnapshot(period, monthStart, monthEnd, result), now)));
+            }
+            // Write the batch and let go of it: the persistence context stays small however many
+            // employees the company has.
+            payslips.flush();
+            // Let go of the batch: the persistence context stays small however many employees
+            // the company has. The run itself was already written and is not touched again.
+            entityManager.clear();
         }
-        payslips.flush();
-        return created;
+        return totals.toTotals();
     }
 
     private String writeSnapshot(YearMonth period, LocalDate start, LocalDate end, PayrollResult result) {
@@ -285,23 +361,26 @@ public class PayrollService {
                 run.getFinalizedBy() == null ? null : run.getFinalizedBy().getId(), run.getFinalizedAt());
     }
 
-    PayrollRunDetailResponse detail(PayrollRun run, List<Payslip> slips) {
-        return new PayrollRunDetailResponse(toRun(run), totals(slips),
-                slips.stream().map(this::toPayslip).toList());
-    }
 
-    static PayrollTotals totals(List<Payslip> slips) {
-        var base = Money.ZERO;
-        var prorated = Money.ZERO;
-        var overtime = Money.ZERO;
-        var holiday = Money.ZERO;
-        var unpaid = Money.ZERO;
-        var absence = Money.ZERO;
-        var gross = Money.ZERO;
-        var insurance = Money.ZERO;
-        var tax = Money.ZERO;
-        var net = Money.ZERO;
-        for (Payslip slip : slips) {
+    /**
+     * The company-level sums of a run, accumulated while the payslips are written - so the
+     * totals are known without holding every payslip in memory.
+     */
+    private static final class Totals {
+        private int employees;
+        private BigDecimal base = Money.ZERO;
+        private BigDecimal prorated = Money.ZERO;
+        private BigDecimal overtime = Money.ZERO;
+        private BigDecimal holiday = Money.ZERO;
+        private BigDecimal unpaid = Money.ZERO;
+        private BigDecimal absence = Money.ZERO;
+        private BigDecimal gross = Money.ZERO;
+        private BigDecimal insurance = Money.ZERO;
+        private BigDecimal tax = Money.ZERO;
+        private BigDecimal net = Money.ZERO;
+
+        void add(Payslip slip) {
+            employees++;
             base = base.add(slip.getBaseSalary());
             prorated = prorated.add(slip.getProratedBase());
             overtime = overtime.add(slip.getOvertimePay());
@@ -313,9 +392,13 @@ public class PayrollService {
             tax = tax.add(slip.getTax());
             net = net.add(slip.getNetPay());
         }
-        return new PayrollTotals(slips.size(), Money.scaled(base), Money.scaled(prorated),
-                Money.scaled(overtime), Money.scaled(holiday), Money.scaled(unpaid), Money.scaled(absence),
-                Money.scaled(gross), Money.scaled(insurance), Money.scaled(tax), Money.scaled(net));
+
+        PayrollTotals toTotals() {
+            return new PayrollTotals(employees, Money.scaled(base), Money.scaled(prorated),
+                    Money.scaled(overtime), Money.scaled(holiday), Money.scaled(unpaid),
+                    Money.scaled(absence), Money.scaled(gross), Money.scaled(insurance),
+                    Money.scaled(tax), Money.scaled(net));
+        }
     }
 
     PayslipResponse toPayslip(Payslip p) {

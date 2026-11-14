@@ -5,6 +5,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Base64;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -198,6 +202,97 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message").value("This token was issued before the last password change"));
         getAs(login(staff.email(), "Rotated@2025"), "/api/employees/me").andExpect(status().isOk());
+    }
+
+    @Test
+    void aTokenIssuedInTheSameSecondAsThePasswordChangeIsRejectedToo() throws Exception {
+        // The gap this closes: the old check compared the JWT `iat` (one-second resolution)
+        // with password_changed_at, so a token minted in the SAME second as the password change
+        // was indistinguishable from one minted before it and kept working. The token version
+        // separates them, so no sleep is needed here - and the test proves it by checking that
+        // the token and the change really landed in the same second.
+        for (int attempt = 0; attempt < 10; attempt++) {
+            String admin = adminToken();
+            NewEmployee staff = createEmployee(admin, "Nina Second", Role.EMPLOYEE, null);
+            String old = login(staff.email(), staff.password());
+
+            mvc.perform(post("/api/auth/change-password").header("Authorization", bearer(old))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(json.writeValueAsString(
+                                    Map.of("currentPassword", staff.password(), "newPassword", "Rotated@2025"))))
+                    .andExpect(status().isOk());
+
+            Instant issuedAt = issuedAtOf(old);
+            Instant changedAt = jdbc.queryForObject(
+                    "select password_changed_at from employees where id = ?", Instant.class, staff.id());
+            if (!issuedAt.truncatedTo(ChronoUnit.SECONDS).equals(changedAt.truncatedTo(ChronoUnit.SECONDS))) {
+                // The two landed in different seconds: the old timestamp check would already
+                // have caught this, so retry until the interesting case is hit.
+                continue;
+            }
+
+            // Same second - and the old token is still rejected, because its version is one
+            // behind the employee's.
+            getAs(old, "/api/employees/me")
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.message")
+                            .value("This token was issued before the last password change"));
+            // The token handed out by the change itself works.
+            getAs(login(staff.email(), "Rotated@2025"), "/api/employees/me").andExpect(status().isOk());
+            return;
+        }
+        throw new AssertionError("could not get the token issuance and the password change into the same second");
+    }
+
+    @Test
+    void theTokenCarriesTheTokenVersionAndThePasswordChangeBumpsIt() throws Exception {
+        String admin = adminToken();
+        NewEmployee staff = createEmployee(admin, "Vera Version", Role.EMPLOYEE, null);
+        String before = login(staff.email(), staff.password());
+
+        int versionBefore = tokenVersionOf(before);
+        Integer storedBefore = jdbc.queryForObject(
+                "select token_version from employees where id = ?", Integer.class, staff.id());
+        assertThat(storedBefore).isEqualTo(versionBefore);
+
+        // The change hands out the replacement token in the X-Access-Token header.
+        String fresh = mvc.perform(post("/api/auth/change-password").header("Authorization", bearer(before))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(
+                                Map.of("currentPassword", staff.password(), "newPassword", "Rotated@2025"))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getHeader("X-Access-Token");
+        assertThat(fresh).isNotBlank();
+
+        Integer storedAfter = jdbc.queryForObject(
+                "select token_version from employees where id = ?", Integer.class, staff.id());
+        assertThat(storedAfter).isEqualTo(versionBefore + 1);
+
+        // The token handed out by the change carries the incremented version ...
+        assertThat(tokenVersionOf(fresh)).isEqualTo(storedAfter);
+        // ... and it works on an authenticated endpoint.
+        getAs(fresh, "/api/employees/me").andExpect(status().isOk());
+        // The token from before the change cannot, even though it is still unexpired.
+        getAs(before, "/api/employees/me")
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message")
+                        .value("This token was issued before the last password change"));
+        // A fresh login carries the same version as the one the change handed out.
+        assertThat(tokenVersionOf(login(staff.email(), "Rotated@2025"))).isEqualTo(storedAfter);
+    }
+
+    /** The {@code iat} claim of a token, in seconds since the epoch. */
+    private Instant issuedAtOf(String token) throws Exception {
+        return Instant.ofEpochSecond(json.readTree(decodePayload(token)).path("iat").asLong());
+    }
+
+    /** The token version claim of a token. */
+    private int tokenVersionOf(String token) throws Exception {
+        return json.readTree(decodePayload(token)).path("ver").asInt();
+    }
+
+    private String decodePayload(String token) {
+        return new String(Base64.getUrlDecoder().decode(token.split("\\.")[1]), StandardCharsets.UTF_8);
     }
 
     @Test

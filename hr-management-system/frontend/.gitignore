@@ -7,3 +7,9 @@ dist/
 .eslintcache
 node_modules/.tmp/
 *.tsbuildinfo
+
+# Playwright test artifacts
+test-results/
+playwright-report/
+blob-report/
+

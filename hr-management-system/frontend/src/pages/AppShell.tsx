@@ -8,6 +8,8 @@ import { humanizeEnum } from '../lib/format';
 interface NavItem {
   to: string;
   label: string;
+  /** Match the path exactly, for entries whose path prefixes other menu entries. */
+  end?: boolean;
 }
 
 /**
@@ -21,7 +23,7 @@ export function AppShell(): JSX.Element {
   useCardGlow();
 
   const mine: NavItem[] = [
-    { to: '/', label: 'Dashboard' },
+    { to: '/', label: 'Dashboard', end: true },
     { to: '/leave', label: 'Leave' },
     { to: '/attendance', label: 'Attendance' },
     { to: '/payslips', label: 'Payslips' },
@@ -31,7 +33,7 @@ export function AppShell(): JSX.Element {
 
   const team: NavItem[] = canSeeTeamScreens(role, isManager)
     ? [
-        { to: '/team', label: 'My team' },
+        { to: '/team', label: 'My team', end: true },
         { to: '/approvals', label: 'Approvals' },
         { to: '/team/calendar', label: 'Team calendar' },
         { to: '/team/today', label: 'Team today' },
@@ -61,7 +63,7 @@ export function AppShell(): JSX.Element {
             <li key={item.to}>
               <NavLink
                 to={item.to}
-                end={item.to === '/'}
+                end={item.end === true}
                 className={({ isActive }) => (isActive ? 'nav-link nav-link-active' : 'nav-link')}
                 onClick={() => {
                   setNavOpen(false);

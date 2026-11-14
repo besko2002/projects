@@ -50,10 +50,15 @@ public final class PayrollDtos {
             BigDecimal netPay) {
     }
 
+    /**
+     * A payroll run with its totals. The payslips themselves are NOT part of this response:
+     * a run over 20,000 employees would be tens of megabytes of JSON (and building that list
+     * was what ran the API out of memory). They are served page by page through
+     * {@code GET /api/payroll/runs/{runId}/payslips}.
+     */
     public record PayrollRunDetailResponse(
             PayrollRunResponse run,
-            PayrollTotals totals,
-            List<PayslipResponse> payslips) {
+            PayrollTotals totals) {
     }
 
     /**

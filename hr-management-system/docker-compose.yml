@@ -4,19 +4,64 @@ services:
     container_name: hr-management-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: hr
-      POSTGRES_USER: hr
-      POSTGRES_PASSWORD: hr
+      POSTGRES_DB: ${DB_NAME:-hr}
+      POSTGRES_USER: ${DB_USERNAME:-hr}
+      # No default on purpose. `${VAR:?message}` makes Compose refuse to start instead of
+      # falling back to a trivial password like "hr".
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set - see .env.example}
+    # Compose can only require a variable to be PRESENT, not that it is strong, so the
+    # strength check runs inside the container: the database refuses to initialise with a
+    # missing or placeholder password, exactly like the application does
+    # (DatabasePasswordPolicy). This keeps the standalone path (`docker compose up postgres`)
+    # from accepting a password the API would reject.
+    command:
+      - sh
+      - -c
+      - |
+        case "$$POSTGRES_PASSWORD" in
+          ""|hr|postgres|password|secret|changeme|change-me|admin|administrator|root|letmein|welcome|qwerty|123456|123456789|dbpassword|db_password|localdev|local-dev)
+            echo "POSTGRES_PASSWORD is missing or a placeholder password. Generate one with 'openssl rand -base64 24' - see .env.example." >&2
+            exit 1
+            ;;
+        esac
+        if [ "$${#POSTGRES_PASSWORD}" -lt 12 ]; then
+          echo "POSTGRES_PASSWORD must be at least 12 characters long - see .env.example." >&2
+          exit 1
+        fi
+        exec docker-entrypoint.sh postgres
     ports:
-      - "5437:5432"
+      # Loopback only. This is a local development database, not a network service; nothing
+      # outside this machine has any business reaching it.
+      - "127.0.0.1:5437:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hr -d hr"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-hr} -d ${DB_NAME:-hr}"]
       interval: 5s
       timeout: 5s
       retries: 12
       start_period: 10s
+
+  # The shared login throttle (app.login-rate-limit.store=redis). Only needed when the API
+  # runs more than one instance - with a single instance the in-memory store is enough.
+  #   docker compose --profile app --profile rate-limit up -d
+  redis:
+    image: redis:7-alpine
+    container_name: hr-management-redis
+    profiles: ["rate-limit"]
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb",
+              "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:6381:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
 
   # Optional: docker compose --profile app up -d --build
   app:
@@ -25,20 +70,37 @@ services:
     image: hr-management-system:local
     container_name: hr-management-app
     restart: unless-stopped
+    # Container memory limit (hard cgroup ceiling). Docker memory limits do not throttle requests;
+    # exceeding this limit triggers the Linux cgroups OOM-killer (terminating the container with exit 137).
+    # To prevent container OOM kills under load, the JVM heap is bounded to 50% of the container limit
+    # (~384 MB via MaxRAMPercentage=50), leaving ample headroom for Metaspace (128 MB), thread stacks,
+    # GC structures, native buffers, and OS overhead.
+    mem_limit: 768m
     ports:
-      - "8091:8091"
+      - "127.0.0.1:8091:8091"
     environment:
-      DB_URL: jdbc:postgresql://postgres:5432/hr
+      DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-hr}
       DB_USERNAME: ${DB_USERNAME:-hr}
-      DB_PASSWORD: ${DB_PASSWORD:-hr}
+      # The same password the database was created with - and no default: Compose refuses to
+      # start without it. The application additionally refuses to start with a placeholder.
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set - see .env.example}
       DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
       SERVER_PORT: ${SERVER_PORT:-8091}
-      JWT_SECRET: ${JWT_SECRET:-}  # required: the app refuses to start without a 32+ byte secret
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set - see .env.example}  # required: at least 32 bytes
       JWT_EXPIRATION: ${JWT_EXPIRATION:-PT8H}
       HR_ADMIN_EMAIL: ${HR_ADMIN_EMAIL:-admin@hr.local}
       HR_ADMIN_PASSWORD: ${HR_ADMIN_PASSWORD:-}
+      # Set LOGIN_RATE_LIMIT_STORE=redis (and bring the rate-limit profile up) to share the
+      # sign-in counters between several instances of the API.
+      LOGIN_RATE_LIMIT_STORE: ${LOGIN_RATE_LIMIT_STORE:-memory}
+      REDIS_HEALTH_ENABLED: ${REDIS_HEALTH_ENABLED:-false}
+      SPRING_DATA_REDIS_HOST: ${REDIS_HOST:-redis}
+      SPRING_DATA_REDIS_PORT: ${REDIS_PORT:-6379}
       SPRINGDOC_ENABLED: ${SPRINGDOC_ENABLED:-false}
       LOG_LEVEL_APP: ${LOG_LEVEL_APP:-INFO}
+      # Matches the container limit above: 768 MB total, of which the heap takes at most 50%,
+      # so the JVM, the metaspace and the direct buffers stay inside the limit.
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=50 -XX:+UseG1GC -XX:MaxMetaspaceSize=128m"
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,7 +111,7 @@ services:
     image: hr-management-frontend:local
     container_name: hr-management-frontend
     restart: unless-stopped
-    ports: ["5175:80"]
+    ports: ["127.0.0.1:5175:80"]
     depends_on:
       app: { condition: service_healthy }
     mem_limit: 64m
@@ -57,3 +119,5 @@ services:
 volumes:
   postgres-data:
     name: hr-management-postgres-data
+  redis-data:
+    name: hr-management-redis-data

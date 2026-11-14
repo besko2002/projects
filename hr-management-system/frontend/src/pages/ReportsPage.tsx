@@ -10,6 +10,7 @@ import type {
 import { Banner } from '../components/Banner';
 import { BarChart, type BarDatum } from '../components/BarChart';
 import { Card, EmptyState, Loading, PageHeader } from '../components/states';
+import { handleTabKeyDown } from '../components/tabKeyboard';
 import { useToast } from '../components/useToast';
 import { currentMonth, currentYear } from '../lib/dates';
 import { saveBlob } from '../lib/download';
@@ -241,13 +242,16 @@ export function ReportsPage(): JSX.Element {
         subtitle="Headcount, leave, payroll and attendance, straight from the reporting endpoints."
       />
 
-      <div className="tabs" role="tablist" aria-label="Reports">
+      <div className="tabs" role="tablist" aria-label="Reports" onKeyDown={handleTabKeyDown}>
         {TABS.map((item) => (
           <button
             key={item.key}
             type="button"
             role="tab"
+            id={`tab-report-${item.key}`}
+            aria-controls={`panel-report-${item.key}`}
             aria-selected={tab === item.key}
+            tabIndex={tab === item.key ? 0 : -1}
             className={tab === item.key ? 'tab tab-active' : 'tab'}
             onClick={() => {
               setTab(item.key);
@@ -299,10 +303,12 @@ export function ReportsPage(): JSX.Element {
         </Card>
       )}
 
-      {tab === 'headcount' && <HeadcountReport />}
-      {tab === 'leave' && <LeaveReport year={year} />}
-      {tab === 'payroll' && <PayrollReport year={year} />}
-      {tab === 'attendance' && <AttendanceReport year={year} month={month} />}
+      <div id={`panel-report-${tab}`} role="tabpanel" aria-labelledby={`tab-report-${tab}`} tabIndex={0}>
+        {tab === 'headcount' && <HeadcountReport />}
+        {tab === 'leave' && <LeaveReport year={year} />}
+        {tab === 'payroll' && <PayrollReport year={year} />}
+        {tab === 'attendance' && <AttendanceReport year={year} month={month} />}
+      </div>
     </>
   );
 }

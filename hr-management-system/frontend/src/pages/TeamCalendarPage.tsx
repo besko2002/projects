@@ -4,6 +4,7 @@ import type { LeaveCalendarEntry } from '../api/types';
 import { Banner } from '../components/Banner';
 import { Card, EmptyState, Loading, PageHeader } from '../components/states';
 import {
+  type MonthRange,
   currentMonth,
   currentYear,
   eachDay,
@@ -34,23 +35,6 @@ export function TeamCalendarPage(): JSX.Element {
   const [month, setMonth] = useState(currentMonth());
   const range = monthRange(year, month);
 
-  const calendar = useResource<LeaveCalendarEntry[]>(
-    (signal) => api.leaveCalendar(range.from, range.to, signal),
-    `leave-calendar-${range.from}`,
-  );
-
-  const byDay = new Map<string, LeaveCalendarEntry[]>();
-  for (const entry of calendar.data ?? []) {
-    for (const day of coveredDays(entry, range.from, range.to)) {
-      const list = byDay.get(day) ?? [];
-      list.push(entry);
-      byDay.set(day, list);
-    }
-  }
-
-  const days = eachDay(range.from, range.to);
-  const leadingBlanks = new Date(`${range.from}T00:00:00Z`).getUTCDay();
-
   return (
     <>
       <PageHeader title="Team calendar" subtitle="Approved leave only. No reasons are shown." />
@@ -75,14 +59,41 @@ export function TeamCalendarPage(): JSX.Element {
           </label>
         }
       >
+        <CalendarMonth key={range.from} range={range} year={year} month={month} />
+      </Card>
+    </>
+  );
+}
+
+function CalendarMonth({ range, year, month }: { range: MonthRange; year: number; month: number }): JSX.Element {
+  // A keyed instance owns each month's resource state: useResource keeps data across key changes.
+  const calendar = useResource<LeaveCalendarEntry[]>(
+    (signal) => api.leaveCalendar(range.from, range.to, signal),
+    `leave-calendar-${range.from}`,
+  );
+
+  const byDay = new Map<string, LeaveCalendarEntry[]>();
+  for (const entry of calendar.data ?? []) {
+    for (const day of coveredDays(entry, range.from, range.to)) {
+      const list = byDay.get(day) ?? [];
+      list.push(entry);
+      byDay.set(day, list);
+    }
+  }
+
+  const days = eachDay(range.from, range.to);
+  const leadingBlanks = new Date(`${range.from}T00:00:00Z`).getUTCDay();
+
+  return (
+    <>
         {calendar.loading && <Loading label="Loading the calendar…" />}
         {calendar.error !== null && <Banner>{calendar.error}</Banner>}
 
-        {calendar.data !== null && calendar.data.length === 0 && (
+        {!calendar.loading && calendar.error === null && calendar.data !== null && calendar.data.length === 0 && (
           <EmptyState title="No approved leave this month." />
         )}
 
-        {calendar.data !== null && calendar.data.length > 0 && (
+        {!calendar.loading && calendar.error === null && calendar.data !== null && calendar.data.length > 0 && (
           <>
             <div className="month-grid" role="group" aria-label={`Leave in ${formatPeriod(year, month)}`}>
               {WEEKDAY_LABELS.map((label) => (
@@ -136,7 +147,6 @@ export function TeamCalendarPage(): JSX.Element {
             </table>
           </>
         )}
-      </Card>
     </>
   );
 }

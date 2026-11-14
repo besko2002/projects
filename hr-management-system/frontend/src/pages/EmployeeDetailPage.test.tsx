@@ -23,6 +23,75 @@ function detailRoutes(overrides: Record<string, RouteHandler> = {}): Record<stri
 }
 
 describe('employee detail', () => {
+  it('supports keyboard navigation between Details and Audit tabs', async () => {
+    const user = userEvent.setup();
+    installFetchMock(detailRoutes());
+    renderApp('/employees/emp-1');
+
+    const details = await screen.findByRole('tab', { name: 'Details' });
+    details.focus();
+    await user.keyboard('{ArrowRight}');
+    const audit = screen.getByRole('tab', { name: 'Audit' });
+    expect(audit).toHaveFocus();
+    expect(audit).toHaveAttribute('aria-selected', 'true');
+    expect(details).toHaveAttribute('tabindex', '-1');
+    expect(screen.getByRole('tabpanel', { name: 'Audit' })).toBeInTheDocument();
+
+    await user.keyboard('{ArrowRight}');
+    expect(details).toHaveFocus();
+    expect(details).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{End}');
+    expect(audit).toHaveFocus();
+    await user.keyboard('{Home}');
+    expect(details).toHaveFocus();
+  });
+
+  it('searches for a manager, leaves the employee themself out and posts the choice', async () => {
+    const user = userEvent.setup();
+    const mock = installFetchMock(detailRoutes({
+      'GET /api/employees': {
+        body: makePage([
+          makeEmployee({ id: 'emp-1', fullName: 'Nadia Hassan', employeeNumber: 'EMP-0001' }),
+          makeEmployee({ id: 'emp-101', fullName: 'Last Manager', employeeNumber: 'EMP-0101' }),
+        ], { page: 0, size: 20, totalElements: 2, totalPages: 1 }),
+      },
+      'PUT /api/employees/emp-1/manager': {
+        body: makeEmployee({ managerId: 'emp-101', managerName: 'Last Manager' }),
+      },
+    }));
+
+    renderApp('/employees/emp-1');
+    const input = await screen.findByRole('combobox', { name: /reports to/i });
+    await user.type(input, 'Manager');
+
+    const option = await screen.findByRole('option', { name: 'Last Manager · EMP-0101' });
+    // The employee themself is never offered as their own manager.
+    expect(screen.queryByRole('option', { name: 'Nadia Hassan · EMP-0001' })).not.toBeInTheDocument();
+    await user.click(option);
+
+    const put = mock.callsTo('PUT /api/employees/emp-1/manager');
+    expect(put).toHaveLength(1);
+    expect(put[put.length - 1].body).toEqual({ managerId: 'emp-101' });
+    // The search asks the server for the typed text instead of loading the whole roster.
+    expect(mock.urlsFor('GET', '/api/employees')).toEqual([
+      '/api/employees?q=Manager&status=ACTIVE&page=0&size=20&sort=fullName%2Casc',
+    ]);
+  });
+
+  it('exposes the search error and offers a retry', async () => {
+    const user = userEvent.setup();
+    installFetchMock(detailRoutes({
+      'GET /api/employees': { status: 500, body: { message: 'Search unavailable' } },
+    }));
+
+    renderApp('/employees/emp-1');
+    const input = await screen.findByRole('combobox', { name: /reports to/i });
+    await user.type(input, 'Omar');
+
+    expect(await screen.findByText('Search unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
   it('asks for confirmation before terminating and only then posts', async () => {
     const user = userEvent.setup();
     const mock = installFetchMock(
@@ -62,6 +131,10 @@ describe('employee detail', () => {
     const user = userEvent.setup();
     const mock = installFetchMock(
       detailRoutes({
+        'GET /api/employees': {
+          body: makePage([makeEmployee({ id: 'emp-9', fullName: 'Omar Said' })],
+            { page: 0, size: 20, totalElements: 1, totalPages: 1 }),
+        },
         'PUT /api/employees/emp-1/manager': {
           body: makeEmployee({ managerId: 'emp-9', managerName: 'Omar Said' }),
         },
@@ -69,7 +142,9 @@ describe('employee detail', () => {
     );
 
     renderApp('/employees/emp-1');
-    await user.selectOptions(await screen.findByLabelText(/reports to/i), 'emp-9');
+    const input = await screen.findByRole('combobox', { name: /reports to/i });
+    await user.type(input, 'Omar');
+    await user.click(await screen.findByRole('option', { name: 'Omar Said · EMP-0001' }));
 
     const put = mock.callsTo('PUT /api/employees/emp-1/manager');
     expect(put).toHaveLength(1);
@@ -80,6 +155,10 @@ describe('employee detail', () => {
     const user = userEvent.setup();
     installFetchMock(
       detailRoutes({
+        'GET /api/employees': {
+          body: makePage([makeEmployee({ id: 'emp-9', fullName: 'Omar Said' })],
+            { page: 0, size: 20, totalElements: 1, totalPages: 1 }),
+        },
         'PUT /api/employees/emp-1/manager': {
           status: 409,
           body: { status: 409, message: 'This manager assignment would create a cycle' },
@@ -88,7 +167,9 @@ describe('employee detail', () => {
     );
 
     renderApp('/employees/emp-1');
-    await user.selectOptions(await screen.findByLabelText(/reports to/i), 'emp-9');
+    const input = await screen.findByRole('combobox', { name: /reports to/i });
+    await user.type(input, 'Omar');
+    await user.click(await screen.findByRole('option', { name: 'Omar Said · EMP-0001' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'This manager assignment would create a cycle',
@@ -104,7 +185,9 @@ describe('employee detail', () => {
     );
 
     renderApp('/employees/emp-1');
-    await user.selectOptions(await screen.findByLabelText(/reports to/i), '');
+    const input = await screen.findByRole('combobox', { name: /reports to/i });
+    await user.click(input);
+    await user.click(await screen.findByRole('option', { name: 'No manager (org root)' }));
 
     expect(mock.callsTo('PUT /api/employees/emp-1/manager')[0].body).toEqual({ managerId: null });
   });

@@ -277,7 +277,7 @@ class PayrollRunIntegrationTest extends AbstractPayrollIntegrationTest {
 
         // HR discovers the missing day and adds it; the draft must follow.
         addSessionOk(hrToken, staff.id(), march(ABSENT_DAY), "09:00", "17:00");
-        JsonNode recalculated = body(recalculate(hrToken, runId).andExpect(status().isOk()));
+        JsonNode recalculated = recalculateOk(hrToken, runId);
 
         JsonNode slip = payslipOf(recalculated, staff.id());
         assertThat(slip.path("absentDays").asInt()).isZero();

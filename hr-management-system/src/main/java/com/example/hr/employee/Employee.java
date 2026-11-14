@@ -95,6 +95,17 @@ public class Employee {
     @Column(name = "password_changed_at")
     private Instant passwordChangedAt;
 
+    /**
+     * Bumped on every password change and carried in the JWT. This is the reliable revocation
+     * signal: {@link #passwordChangedAt} only has second resolution (the JWT {@code iat} has
+     * none finer), so a token minted in the same second as a password change would survive a
+     * timestamp comparison - the version cannot, because it changes on every password change
+     * regardless of the clock.
+     */
+    @NotAudited
+    @Column(name = "token_version", nullable = false)
+    private int tokenVersion;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -184,6 +195,14 @@ public class Employee {
         this.passwordHash = passwordHash;
         this.mustChangePassword = false;
         this.passwordChangedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        // Every password change invalidates the tokens issued before it - including the ones
+        // issued in the same second, which the timestamp above cannot separate.
+        this.tokenVersion++;
+    }
+
+    /** The token version carried in the tokens of this employee; bumped on every password change. */
+    public int getTokenVersion() {
+        return tokenVersion;
     }
 
     /** The manager's id without forcing the lazy association to load a full row. */

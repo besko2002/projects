@@ -97,33 +97,39 @@ public class HierarchyService {
     }
 
     /**
-     * The whole company as a nested tree, built from one recursive CTE and assembled in
-     * memory (no N+1). Roots are the employees without a manager.
+     * The root level of the org chart: the employees without a manager, each with the number of
+     * its direct reports.
+     *
+     * <p>The chart is loaded level by level. Returning the whole company in one payload was
+     * 3.7 MB at 20,000 employees; the client now asks for the children of a node when it
+     * expands it, so every response stays small.
      */
     @Transactional(readOnly = true)
-    public List<OrgChartNode> orgChart() {
+    public List<OrgChartNode> orgChartRoots() {
         currentEmployee.require();
-        List<Object[]> rows = employees.findOrgChartRows();
+        return toNodes(employees.findOrgChartRoots());
+    }
 
-        Map<UUID, List<OrgChartNode>> childrenById = new LinkedHashMap<>();
-        Map<UUID, UUID> parentById = new LinkedHashMap<>();
-        Map<UUID, OrgChartNode> nodes = new LinkedHashMap<>();
+    /**
+     * The direct reports of one employee, each with the number of its own direct reports.
+     *
+     * @param employeeId the manager whose reports are asked for
+     * @return the direct reports, empty when the employee has none
+     */
+    @Transactional(readOnly = true)
+    public List<OrgChartNode> orgChartChildren(UUID employeeId) {
+        currentEmployee.require();
+        require(employeeId);
+        return toNodes(employees.findOrgChartChildren(employeeId));
+    }
+
+    private static List<OrgChartNode> toNodes(List<Object[]> rows) {
+        List<OrgChartNode> nodes = new ArrayList<>(rows.size());
         for (Object[] row : rows) {
-            UUID id = (UUID) row[0];
-            List<OrgChartNode> children = new ArrayList<>();
-            childrenById.put(id, children);
-            nodes.put(id, new OrgChartNode(id, (String) row[1], (String) row[2], (String) row[3], (String) row[4],
-                    children));
-            parentById.put(id, (UUID) row[5]);
+            nodes.add(new OrgChartNode((UUID) row[0], (String) row[1], (String) row[2], (String) row[3],
+                    (String) row[4], ((Number) row[5]).intValue()));
         }
-
-        List<OrgChartNode> roots = new ArrayList<>();
-        for (Map.Entry<UUID, OrgChartNode> entry : nodes.entrySet()) {
-            UUID parentId = parentById.get(entry.getKey());
-            List<OrgChartNode> siblings = parentId == null ? roots : childrenById.get(parentId);
-            (siblings == null ? roots : siblings).add(entry.getValue());
-        }
-        return roots;
+        return nodes;
     }
 
     private Employee require(UUID id) {
