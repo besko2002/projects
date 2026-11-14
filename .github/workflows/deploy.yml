@@ -1,3 +1,8 @@
+# ==============================================================================
+# REFERENCE ONLY - Unverified in live production environment.
+# Provided as a non-blocking reference architecture template.
+# Public/live production deployment is strictly outside project scope.
+# ==============================================================================
 name: Deploy HR Management System
 
 on:

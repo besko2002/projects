@@ -1,3 +1,8 @@
+# ==============================================================================
+# REFERENCE ONLY - Unverified in live production environment.
+# Provided as a non-blocking reference architecture template.
+# Public/live production deployment is strictly outside project scope.
+# ==============================================================================
 # Production Docker Compose for HR Management System
 # Usage:
 #   docker compose -f docker-compose.prod.yml --env-file .env.production config --quiet

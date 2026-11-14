@@ -1,12 +1,13 @@
-# Production Deployment Runbook & Strategy
+# Production Deployment Reference & Operational Runbook
 
-This runbook covers the production architecture, secrets management, deployment procedures, zero-downtime update policy, disaster recovery, and operational maintenance for the HR Management System.
+> [!NOTE]
+> **Reference Documentation**: This document outlines deployment procedures, configuration templates, and operational runbooks for architecture reference. Live public deployment is strictly outside project scope. Production templates (`docker-compose.prod.yml`, `Caddyfile`, `deploy.yml`) are non-blocking reference designs unverified in a live production cluster.
 
 ---
 
 ## 1. System Architecture
 
-The production environment runs via `docker-compose.prod.yml` with strict network segmentation and cgroup resource limits:
+The reference production architecture is configured via `docker-compose.prod.yml` with network segmentation and cgroup resource limits:
 
 ```
                             [ Internet ]
@@ -52,7 +53,7 @@ The production environment runs via `docker-compose.prod.yml` with strict networ
 
 ## 2. Secrets Management & Environment Configuration
 
-All production secrets reside in `/opt/hr-management-system/.env.production` with restrictive POSIX permissions (`chmod 0600` owned by `root`).
+All reference secrets reside in `/opt/hr-management-system/.env.production` with restrictive POSIX permissions (`chmod 0600` owned by `root`).
 
 ### Required Production Variables
 ```bash
@@ -112,7 +113,10 @@ docker compose -f docker-compose.prod.yml --env-file .env.production config --qu
 
 ---
 
-## 4. Zero-Downtime Rolling Update Strategy
+## 4. Rolling Image Update Procedure (Single-Node Notice)
+
+> [!WARNING]
+> **Single-Node Service Interruption**: On a single Docker host, `docker compose up -d --no-deps app` recreates the container in-place. During the 5–15 seconds while Spring Boot initializes and runs Flyway migrations, reverse proxies will return HTTP 502 to clients. True zero-downtime deployment requires multi-instance load balancing with blue/green deployment or orchestration.
 
 ### Flyway Database Migration Policy
 1. **Additive Changes First**: Schema migrations must always be backward compatible with the running application version. Never drop columns, rename columns, or add non-null constraints without default values in a single step.
@@ -121,15 +125,15 @@ docker compose -f docker-compose.prod.yml --env-file .env.production config --qu
    - Phase 2 (Deploy N+1): Update application code to read/write new column.
    - Phase 3 (Deploy N+2): Deprecate and remove old column.
 
-### Rolling Image Update Execution
+### Image Update Execution
 ```bash
 # 1. Pull latest images in the background without affecting live traffic
 docker compose -f docker-compose.prod.yml --env-file .env.production pull
 
-# 2. Recreate backend container (Flyway migrations run automatically on boot)
+# 2. Recreate backend container (service restarts; brief 5–15s transition window)
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --no-deps app
 
-# 3. Wait for app healthcheck to pass (Caddy handles retries / buffering)
+# 3. Wait for app healthcheck to pass
 docker compose -f docker-compose.prod.yml --env-file .env.production exec app curl -fsS http://localhost:8091/actuator/health
 
 # 4. Recreate frontend container
@@ -141,7 +145,38 @@ docker image prune -f
 
 ---
 
-## 5. Rollback Procedures
+## 5. Concurrency, Locking & Scalability Architecture
+
+### Payroll Concurrency & Row-Level Locking
+To prevent race conditions between concurrent recalculate, finalize, and delete requests:
+- `PayrollRun` entity mutations acquire a database row-level lock via `findByIdForUpdate` (`LockModeType.PESSIMISTIC_WRITE`).
+- Run status checks are performed strictly under lock protection before modifying draft payslips or finalizing records.
+- Batch generation writes payslips in chunks within a single transaction, ensuring full atomic rollback if a failure occurs during execution.
+
+### Bounded Org-Chart Pagination
+- Silent `LIMIT 500` truncation is eliminated. The org-chart API endpoints (`/api/org-chart` and `/api/org-chart/{id}/children`) use bounded pagination (`PageResponse<OrgChartNode>`).
+- The frontend supports continuation via "Load more roots" and "Load more reports" buttons, making organizations with arbitrary depth and breadth navigable without unbounded memory payloads.
+
+### Distributed Sliding-Window Throttling
+- When `app.login-rate-limit.store=redis`, `RedisLoginThrottle` uses Redis Sorted Sets (ZSET) with millisecond scores and atomic Lua scripts.
+- Pruning of expired entries older than `now - window` matches `LoginRateLimiter` sliding-window semantics.
+- Outages fail open gracefully with error logging.
+
+### Scale Evidence & Capacity Limits
+- **Isolated 5,000 Employee Workload**:
+  - Validated in `PayrollFullStackScaleTest` against isolated PostgreSQL container.
+  - Database batch seeding: ~0.4s
+  - Org-chart roots & children (4,999 reports) queries: < 100ms
+  - Paged employee search: ~50ms
+  - 5,000 employee payroll run calculation & batch persistence: ~7.3s
+  - Streaming SXSSFWorkbook Excel export (5,000 payslips): ~2.2s (362 KB)
+  - Point-in-time heap snapshot: ~166 MB (note: heap snapshots are point-in-time readings, not continuous peak measurements).
+- **20,000 Capacity Scope**:
+  - Full-stack execution on 20,000 employees is explicitly unverified on local test runners due to container resource constraints.
+
+---
+
+## 6. Rollback Procedures
 
 If a deployment fails health checks or introduces regression:
 
@@ -168,7 +203,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 
 ---
 
-## 6. Backup, Retention & Disaster Recovery
+## 7. Backup, Retention & Disaster Recovery
 
 ### Automated Backup Schedule
 Add the following entry to root crontab (`sudo crontab -e`):
@@ -183,16 +218,13 @@ Add the following entry to root crontab (`sudo crontab -e`):
 
 ---
 
-## 7. Pre-Flight Deployment Checklist
+## 8. Operational Verification Checklist
 
-Before granting production deployment approval:
-- [ ] All unit, integration, and architecture tests passed (`./mvnw test` -> 607 passed).
-- [ ] Frontend linting clean (`npm run lint` -> 0 errors).
-- [ ] Frontend unit tests passed (`npm test` -> 200 passed).
+Before deploying changes:
+- [ ] Targeted backend integration tests passed (`PayrollFullStackScaleTest`, `HierarchyIntegrationTest`, `RedisLoginThrottleIntegrationTest`, `PayrollBatchBoundaryIntegrationTest`, `PayrollRunIntegrationTest`).
+- [ ] Frontend linting clean (`npm run lint` -> 0 errors, 0 warnings).
+- [ ] Frontend unit tests passed (`npm test -- --run` -> all tests pass).
 - [ ] Dependency audits clean (`npm audit` -> 0 vulnerabilities).
-- [ ] End-to-end tests passed (`npm run e2e` -> 5 passed).
+- [ ] End-to-end tests passed on isolated test stack.
 - [ ] Production Compose file syntax verified (`docker compose -f docker-compose.prod.yml config --quiet`).
 - [ ] Strong random secrets generated and stored in `.env.production` (mode `0600`).
-- [ ] DNS A/AAAA records verified with global propagation.
-- [ ] Backup script verified with test backup and test restore.
-- [ ] Bounded load testing verified with zero errors and < 384 MB heap.
