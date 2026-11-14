@@ -437,6 +437,7 @@ export function EmployeeDetailPage(): JSX.Element {
                       <ManagerCombobox
                         id="set-manager"
                         value={data.managerId ?? ''}
+                        initialLabel={data.managerName}
                         excludeId={data.id}
                         searchKey={`manager-candidates-${data.id}`}
                         disabled={managerBusy}

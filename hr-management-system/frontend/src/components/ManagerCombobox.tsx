@@ -14,6 +14,8 @@ interface ManagerComboboxProps {
   disabled?: boolean;
   /** Identifies the search (a different key restarts it). */
   searchKey: string;
+  /** Initial or existing display label for the selected manager. */
+  initialLabel?: string | null;
   /** Called after a retry, so the screen can react (the combobox retries on its own). */
   onRetry?: () => void;
 }
@@ -32,26 +34,27 @@ export function ManagerCombobox({
   id,
   disabled = false,
   searchKey,
+  initialLabel,
   onRetry,
 }: ManagerComboboxProps): JSX.Element {
   const search = useManagerSearch(searchKey, excludeId);
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
+  const [chosenCandidate, setChosenCandidate] = useState<{ id: string; label: string } | null>(null);
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // When loading a new search query, do NOT offer stale selectable results.
-  const candidates = search.loading ? [] : search.results;
-
-  // Derive the selected employee label if present in search results
-  const selectedInResults = search.results.find((employee) => employee.id === value);
+  // Purely derived selected manager label: chosen candidate in this session, or initialLabel
   const selectedLabel =
     value === ''
       ? null
-      : selectedInResults
-        ? `${selectedInResults.fullName} · ${selectedInResults.employeeNumber}`
-        : null;
+      : chosenCandidate && chosenCandidate.id === value
+        ? chosenCandidate.label
+        : (initialLabel ?? null);
+
+  // When loading a new search query, do NOT offer stale selectable results.
+  const candidates = search.loading ? [] : search.results;
 
   // Options count: option 0 is always "No manager (org root)", followed by candidates.
   const totalOptions = 1 + candidates.length;
@@ -73,18 +76,26 @@ export function ManagerCombobox({
   }, [open]);
 
   function chooseNone(): void {
+    setChosenCandidate(null);
     onChange('');
+    search.clear();
     setOpen(false);
     inputRef.current?.focus();
   }
 
   function choose(employee: EmployeeRecord): void {
+    setChosenCandidate({
+      id: employee.id,
+      label: `${employee.fullName} · ${employee.employeeNumber}`,
+    });
     onChange(employee.id);
+    search.clear();
     setOpen(false);
     inputRef.current?.focus();
   }
 
   function clearSelection(): void {
+    setChosenCandidate(null);
     onChange('');
     search.clear();
     setHighlighted(0);
@@ -149,6 +160,16 @@ export function ManagerCombobox({
 
   return (
     <div className="combobox" ref={rootRef}>
+      {selectedLabel && value !== '' && (
+        <div
+          className="combobox-selection"
+          data-testid="selected-manager-display"
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}
+        >
+          <span className="muted">Current manager:</span>
+          <strong>{selectedLabel}</strong>
+        </div>
+      )}
       <div className="combobox-control">
         <input
           id={id}
@@ -161,7 +182,7 @@ export function ManagerCombobox({
           aria-activedescendant={activeOptionId}
           autoComplete="off"
           disabled={disabled}
-          placeholder={selectedLabel ?? 'Search for a manager…'}
+          placeholder={selectedLabel ? 'Search to change manager…' : 'Search for a manager…'}
           value={search.query}
           onChange={(event) => {
             search.setQuery(event.target.value);

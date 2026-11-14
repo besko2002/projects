@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -168,5 +169,84 @@ describe('ManagerCombobox', () => {
 
     await user.click(retryBtn);
     expect(onRetry).toHaveBeenCalled();
+  });
+
+  it('displays existing manager with initialLabel and removes it when cleared', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+
+    const { rerender } = renderCombobox(
+      <ManagerCombobox
+        id="test-manager"
+        value="emp-existing"
+        initialLabel="Jane Existing · EMP-0005"
+        onChange={onChange}
+        searchKey="test-key"
+      />,
+    );
+
+    const display = screen.getByTestId('selected-manager-display');
+    expect(display).toHaveTextContent('Jane Existing · EMP-0005');
+
+    const clearButton = screen.getByRole('button', { name: /clear manager/i });
+    await user.click(clearButton);
+    expect(onChange).toHaveBeenCalledWith('');
+
+    // Rerender after parent sets value to ''
+    rerender(
+      <Providers>
+        <ManagerCombobox
+          id="test-manager"
+          value=""
+          onChange={onChange}
+          searchKey="test-key"
+        />
+      </Providers>,
+    );
+
+    expect(screen.queryByTestId('selected-manager-display')).not.toBeInTheDocument();
+  });
+
+  it('shows selected result label when a search candidate is chosen', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+
+    installFetchMock({
+      'GET /api/employees?q=Alice&status=ACTIVE&page=0&size=20&sort=fullName%2Casc': {
+        body: {
+          content: [makeEmployee({ id: 'emp-alice', fullName: 'Alice Smith', employeeNumber: 'EMP-0010' })],
+          page: 0,
+          size: 20,
+          totalElements: 1,
+          totalPages: 1,
+        },
+      },
+    });
+
+    function StatefulManagerPicker() {
+      const [val, setVal] = useState('');
+      return (
+        <ManagerCombobox
+          id="test-manager"
+          value={val}
+          onChange={(v) => {
+            setVal(v);
+            onChange(v);
+          }}
+          searchKey="test-key"
+        />
+      );
+    }
+
+    renderCombobox(<StatefulManagerPicker />);
+
+    const input = screen.getByRole('combobox');
+    await user.type(input, 'Alice');
+
+    const option = await screen.findByRole('option', { name: /alice smith/i });
+    await user.click(option);
+
+    expect(onChange).toHaveBeenCalledWith('emp-alice');
+    expect(screen.getByTestId('selected-manager-display')).toHaveTextContent('Alice Smith · EMP-0010');
   });
 });
