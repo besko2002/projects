@@ -137,8 +137,34 @@ class RedisLoginThrottleIntegrationTest {
         }
         pool.shutdown();
 
-        String countStr = redis.opsForValue().get("hr:login-fail:" + email + "|" + ip);
-        assertThat(countStr).isEqualTo("20");
+        Long count = redis.opsForZSet().zCard("hr:login-fail:" + email + "|" + ip);
+        assertThat(count).isEqualTo(20);
+    }
+
+    @Test
+    void slidingWindowPrunesEntriesOutsideWindow() {
+        RedisLoginThrottle throttle = new RedisLoginThrottle(redis, 5, Duration.ofMinutes(15), 10,
+                Duration.ofMinutes(15), Clock.systemUTC());
+
+        String email = "sliding@hr.local";
+        String ip = "10.0.0.88";
+        String key = "hr:login-fail:" + email + "|" + ip;
+
+        // Seed 4 old failures with timestamp 20 minutes ago (outside 15-minute window)
+        long oldMillis = System.currentTimeMillis() - Duration.ofMinutes(20).toMillis();
+        redis.opsForZSet().add(key, "old-1", oldMillis);
+        redis.opsForZSet().add(key, "old-2", oldMillis + 1000);
+        redis.opsForZSet().add(key, "old-3", oldMillis + 2000);
+        redis.opsForZSet().add(key, "old-4", oldMillis + 3000);
+
+        assertThat(redis.opsForZSet().zCard(key)).isEqualTo(4);
+
+        // Record a new failure now: this triggers sliding-window pruning of old entries
+        throttle.recordFailure(email, ip);
+
+        // Only the current failure should remain; old entries were pruned
+        assertThat(redis.opsForZSet().zCard(key)).isEqualTo(1);
+        assertThat(throttle.isBlocked(email, ip)).isFalse();
     }
 
     @Test

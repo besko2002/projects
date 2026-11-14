@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -19,15 +20,14 @@ import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
 /**
- * The same throttle as {@link LoginRateLimiter}, but in Redis, so several instances of the API
- * share one set of counters. Active when {@code app.login-rate-limit.store=redis}.
+ * Distributed sliding-window login throttle in Redis, matching the semantics of {@link LoginRateLimiter}
+ * across multiple API instances. Active when {@code app.login-rate-limit.store=redis}.
  *
- * <p>Two keys per (e-mail, IP): a counter that runs out with the window, and the lock of the
- * account itself, which carries its own expiry. The lock unlocks itself: it is simply gone when
- * the TTL is over.
+ * <p>Uses Redis Sorted Sets (ZSET) where each member is a unique failure attempt and the score
+ * is the epoch millisecond. Pruning of expired entries older than {@code now - window} and counting
+ * are executed atomically via Lua scripts.
  *
- * <p>Counter increments and TTL expiry are atomic via a Redis Lua script to avoid persistent
- * keys on crash. Outages fail open gracefully with error logging.
+ * <p>Outages fail open gracefully with error logging.
  */
 @Component
 @ConditionalOnProperty(prefix = "app.login-rate-limit", name = "store", havingValue = "redis")
@@ -39,13 +39,32 @@ public class RedisLoginThrottle implements LoginThrottle {
     private static final String ACCOUNT_FAILURES_PREFIX = "hr:login-fail-account:";
     private static final String LOCK_PREFIX = "hr:login-lock:";
 
-    private static final RedisScript<Long> INCR_EXPIRE_SCRIPT = new DefaultRedisScript<>(
+    /**
+     * Atomic sliding window failure record:
+     * 1. Remove entries older than cutoff (now - window).
+     * 2. Add current failure entry.
+     * 3. Set rolling PEXPIRE to window duration.
+     * 4. Return total active entries in the window.
+     */
+    private static final RedisScript<Long> RECORD_FAILURE_SCRIPT = new DefaultRedisScript<>(
             """
-            local current = redis.call('INCR', KEYS[1])
-            if current == 1 then
-                redis.call('EXPIRE', KEYS[1], ARGV[1])
-            end
-            return current
+            local cutoff = tonumber(ARGV[1]) - tonumber(ARGV[2])
+            redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', cutoff)
+            redis.call('ZADD', KEYS[1], ARGV[1], ARGV[3])
+            redis.call('PEXPIRE', KEYS[1], ARGV[2])
+            return redis.call('ZCARD', KEYS[1])
+            """, Long.class);
+
+    /**
+     * Atomic sliding window check:
+     * 1. Remove entries older than cutoff.
+     * 2. Return remaining active entries count.
+     */
+    private static final RedisScript<Long> CHECK_FAILURES_SCRIPT = new DefaultRedisScript<>(
+            """
+            local cutoff = tonumber(ARGV[1]) - tonumber(ARGV[2])
+            redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', cutoff)
+            return redis.call('ZCARD', KEYS[1])
             """, Long.class);
 
     private final StringRedisTemplate redis;
@@ -77,13 +96,13 @@ public class RedisLoginThrottle implements LoginThrottle {
     @Override
     public boolean isBlocked(String email, String ip) {
         try {
-            String value = redis.opsForValue().get(failureKey(email, ip));
-            if (value == null) {
-                return false;
-            }
-            return Long.parseLong(value) >= maxFailures;
-        } catch (NumberFormatException ex) {
-            return false;
+            long nowMillis = clock.millis();
+            long windowMillis = window.toMillis();
+            Long count = redis.execute(CHECK_FAILURES_SCRIPT,
+                    List.of(failureKey(email, ip)),
+                    String.valueOf(nowMillis),
+                    String.valueOf(windowMillis));
+            return count != null && count >= maxFailures;
         } catch (Exception ex) {
             log.error("Redis outage during isBlocked check for {} (failing open)", email, ex);
             return false;
@@ -92,24 +111,27 @@ public class RedisLoginThrottle implements LoginThrottle {
 
     @Override
     public void recordFailure(String email, String ip) {
-        String key = failureKey(email, ip);
-        Long failures = atomicIncrement(key, window);
+        long nowMillis = clock.millis();
+        long windowMillis = window.toMillis();
+        String member = nowMillis + ":" + UUID.randomUUID();
 
-        // The lock counts the failures of the ACCOUNT, over all addresses: guessing from many
-        // addresses must not buy more attempts.
-        String accountKey = ACCOUNT_FAILURES_PREFIX + email;
-        Long accountFailures = atomicIncrement(accountKey, window);
+        Long failures = recordInZSet(failureKey(email, ip), nowMillis, windowMillis, member);
+        Long accountFailures = recordInZSet(ACCOUNT_FAILURES_PREFIX + email, nowMillis, windowMillis, member);
 
         if (accountFailures != null && accountFailures >= lockAfterFailures) {
             lock(email, clock.instant().plus(lockoutDuration));
         }
     }
 
-    private Long atomicIncrement(String key, Duration ttl) {
+    private Long recordInZSet(String key, long nowMillis, long windowMillis, String member) {
         try {
-            return redis.execute(INCR_EXPIRE_SCRIPT, List.of(key), String.valueOf(ttl.toSeconds()));
+            return redis.execute(RECORD_FAILURE_SCRIPT,
+                    List.of(key),
+                    String.valueOf(nowMillis),
+                    String.valueOf(windowMillis),
+                    member);
         } catch (Exception ex) {
-            log.error("Redis outage during atomicIncrement for key {}", key, ex);
+            log.error("Redis outage during recordFailure for key {}", key, ex);
             return null;
         }
     }
@@ -130,7 +152,12 @@ public class RedisLoginThrottle implements LoginThrottle {
             if (value == null) {
                 return Optional.empty();
             }
-            return Optional.of(Instant.parse(value));
+            Instant until = Instant.parse(value);
+            if (!until.isAfter(clock.instant())) {
+                redis.delete(LOCK_PREFIX + email);
+                return Optional.empty();
+            }
+            return Optional.of(until);
         } catch (Exception ex) {
             log.warn("Redis outage or unreadable lock for {} - ignoring it (failing open)", email, ex);
             return Optional.empty();
@@ -140,8 +167,8 @@ public class RedisLoginThrottle implements LoginThrottle {
     @Override
     public void lock(String email, Instant until) {
         try {
-            redis.opsForValue().set(LOCK_PREFIX + email, until.toString(), lockoutDuration.toSeconds(),
-                    TimeUnit.SECONDS);
+            long remainingMillis = Math.max(1, Duration.between(clock.instant(), until).toMillis());
+            redis.opsForValue().set(LOCK_PREFIX + email, until.toString(), remainingMillis, TimeUnit.MILLISECONDS);
         } catch (Exception ex) {
             log.error("Redis outage during lock for {}", email, ex);
         }
