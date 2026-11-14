@@ -19,11 +19,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Public authentication endpoints. */
+/** Public authentication endpoints and token invalidation. */
 @RestController
 @RequestMapping("/api/auth")
 @Tag(name = "Authentication", description = "Registration and login")
-@SecurityRequirements
 public class AuthController {
 
     private final UserService userService;
@@ -35,6 +34,7 @@ public class AuthController {
     }
 
     @PostMapping("/register")
+    @SecurityRequirements
     @Operation(summary = "Register a new user account (role USER)")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Account created"),
@@ -50,6 +50,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
+    @SecurityRequirements
     @Operation(summary = "Exchange email and password for an access token")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Authenticated"),
@@ -72,6 +73,11 @@ public class AuthController {
 
     @PostMapping("/logout")
     @Operation(summary = "Invalidate all of the caller's access tokens")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "All access tokens revoked"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid token",
+                    content = @Content(schema = @Schema(implementation = ApiError.class)))
+    })
     public ResponseEntity<Void> logout(@AuthenticationPrincipal AuthenticatedUser principal) {
         userService.logoutEverywhere(principal.id());
         return ResponseEntity.noContent().build();

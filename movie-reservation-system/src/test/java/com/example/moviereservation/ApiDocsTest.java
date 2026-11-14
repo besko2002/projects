@@ -25,7 +25,12 @@ class ApiDocsTest {
         mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.info.title").value("Movie Reservation System API"))
-                .andExpect(jsonPath("$.paths['/api/movies']").exists());
+                .andExpect(jsonPath("$.paths['/api/movies']").exists())
+                .andExpect(jsonPath("$.paths['/api/auth/register'].post.security").isEmpty())
+                .andExpect(jsonPath("$.paths['/api/auth/login'].post.security").isEmpty())
+                .andExpect(jsonPath("$.paths['/api/auth/logout'].post.security").doesNotExist())
+                .andExpect(jsonPath("$.paths['/api/auth/logout'].post.responses['204']").exists())
+                .andExpect(jsonPath("$.paths['/api/auth/logout'].post.responses['401']").exists());
     }
 
     @Test
