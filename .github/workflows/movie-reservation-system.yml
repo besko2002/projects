@@ -32,4 +32,6 @@ jobs:
 
       # Testcontainers starts PostgreSQL through the Docker daemon on the runner.
       - name: Build and run tests
-        run: ./mvnw -B clean verify
+        env:
+          MAVEN_OPTS: "-Xmx512m"
+        run: ./mvnw -B clean verify -DargLine="-Xmx512m"

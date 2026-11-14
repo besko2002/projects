@@ -17,7 +17,7 @@ repository — it calls that module's public service.
                 │                                                                       │
   users ──── movies ──── theaters ──── seatreservation ──── tickets ────────────► Stripe
     │           │            │               │                  │
-    └───────────┴────────────┴─── PostgreSQL (one database, Flyway V1–V7) ───────┘
+    └───────────┴────────────┴─── PostgreSQL (one database, Flyway V1–V10) ──────┘
 ```
 
 | Module            | Responsibility |
@@ -166,6 +166,7 @@ password: Admin@12345
 | ------------- | ---- | ----------- |
 | `POST /api/auth/register` | public | Create an account (role `USER`) and return a token. |
 | `POST /api/auth/login` | public | Exchange email + password for an access token. |
+| `POST /api/auth/logout` | USER | Revoke all issued JWTs for this account; sign in again for a new token. |
 | `GET /api/users/me` | USER | Profile of the token owner. |
 
 ### Movies (`movies`)
@@ -227,7 +228,6 @@ password: Admin@12345
 | `GET /api/tickets/{id}` | USER | One ticket (your own; an ADMIN may read any). |
 | `DELETE /api/tickets/{id}` | USER | Cancel a ticket; a pending one also expires its Stripe page, a PAID one is refunded in full if the cutoff has not passed. A payment that still lands after cancellation is refunded by the webhook. |
 | `POST /api/payments/stripe/webhook` | Stripe signature | Webhook deliveries; public route, authenticated by the `Stripe-Signature` header. |
-| `POST /api/auth/logout` | USER | Revoke all issued JWTs for this account; sign in again for a new token. |
 | `GET /payment/success`, `/payment/cancel` | public | Non-sensitive browser return pages; the verified webhook, not the redirect, confirms payment. |
 
 ### Admin reports (`tickets`)
@@ -422,7 +422,7 @@ movie-reservation-system/
     │   │   └── users/              # register/login, profile, admin seeding
     │   └── resources
     │       ├── application.yml
-    │       └── db/migration/       # V1__baseline … V7__create_tickets
+    │       └── db/migration/       # V1__baseline … V10__prevent_schedule_overlaps
     └── test/java/com/example/moviereservation
         ├── TestcontainersConfiguration.java   # shared PostgreSQL 16 container
         ├── ApiDocsTest.java, ApplicationContextAndFlywayTest.java
