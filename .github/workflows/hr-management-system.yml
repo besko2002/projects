@@ -56,6 +56,12 @@ jobs:
   e2e:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    # Disposable test credentials are required when Compose parses both up and down.
+    env:
+      DB_PASSWORD: e2e-db-password-7hJ3
+      JWT_SECRET: e2e-hr-secret-0123456789abcdef-0123456789
+      HR_ADMIN_PASSWORD: E2eAdmin@2026
+      HR_ADMIN_EMAIL: admin@hr.local
     defaults:
       run:
         working-directory: hr-management-system
@@ -65,11 +71,6 @@ jobs:
       - name: Start isolated e2e stack
         run: |
           docker compose -f docker-compose.yml -f docker-compose.e2e.yml -p hr-e2e --profile app up -d --build --wait
-        env:
-          DB_PASSWORD: e2e-db-password-7hJ3
-          JWT_SECRET: e2e-hr-secret-0123456789abcdef-0123456789
-          HR_ADMIN_PASSWORD: E2eAdmin@2026
-          HR_ADMIN_EMAIL: admin@hr.local
 
       - uses: actions/setup-node@v7
         with:
