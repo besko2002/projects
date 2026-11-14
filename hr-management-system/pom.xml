@@ -22,7 +22,7 @@
         <springdoc.version>2.9.1</springdoc.version>
         <poi.version>5.4.1</poi.version>
         <openpdf.version>2.0.3</openpdf.version>
-        <pdfbox.version>3.0.7</pdfbox.version>
+        <pdfbox.version>3.0.8</pdfbox.version>
     </properties>
 
     <dependencies>
