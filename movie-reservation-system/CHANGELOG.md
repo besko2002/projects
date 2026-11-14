@@ -8,6 +8,17 @@ All notable changes to the Movie Reservation System backend are documented in th
 - **OpenAPI / Swagger Auth Documentation for Logout**: Resolved OpenAPI specification inconsistency where class-level `@SecurityRequirements` on `AuthController` caused `POST /api/auth/logout` to be declared as unauthenticated with an empty security array (`"security": []`) and a `200 OK` response. Restricted `@SecurityRequirements` strictly to public registration (`/api/auth/register`) and login (`/api/auth/login`) operations. Explicitly documented `@ApiResponse` `204 No Content` and `401 Unauthorized` on logout, ensuring Swagger UI and API clients correctly require `bearerAuth`.
 - **Stale Pending Ticket Deadlock on Checkout**: Fixed checkout blockage in `TicketService.checkout` where a user with an expired or abandoned `PENDING_PAYMENT` ticket was permanently prevented from checking out newly held seats due to a unique constraint violation (`409 Conflict`). The service now automatically detects when an existing pending ticket has no active holds, safely marks the stale ticket as `EXPIRED`, releases dangling seats, cancels the Stripe session quietly, and proceeds to create a new ticket.
 
+- **Stale Pending Ticket Row Lock**: The stale-ticket expiry path in checkout now locks the ticket row
+  (`findByIdForUpdate`) and re-checks `PENDING_PAYMENT` before changing it, like every other ticket
+  transition, so a concurrent webhook result is never overwritten.
+
+### Verified
+- **Live Stripe test mode (manual, 2026-11-14)**: against an isolated instance and throwaway database,
+  a real Stripe Checkout session was paid with test card 4242 ($25.00 succeeded), the signed
+  `checkout.session.completed` webhook (forwarded by the Stripe CLI) marked the ticket PAID, and
+  cancelling it issued a full refund on Stripe with `charge.refunded` processed and the seats released.
+  The automated suite (206 tests) still never calls Stripe over the network.
+
 ### Added
 - **Webhook Expiry and Out-of-Order Lifecycle Tests**: Added integration tests in `PaymentWebhookIntegrationTest` covering critical distributed edge cases:
   - `sessionExpiredMarksTicketExpiredAndReleasesSeats`: Verifies `checkout.session.expired` webhook transitions ticket to `EXPIRED` and frees seats for re-booking.

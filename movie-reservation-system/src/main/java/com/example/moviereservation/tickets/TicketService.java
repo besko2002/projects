@@ -183,6 +183,14 @@ public class TicketService {
         Optional<Ticket> pending = ticketRepository.findFirstByUserIdAndScheduleIdAndStatusOrderByIdDesc(
                 userId, scheduleId, TicketStatus.PENDING_PAYMENT);
         if (pending.isPresent()) {
+            // Like every other transition, lock the row first and re-check its status: a webhook for
+            // this ticket may have changed it while we waited, and must not be overwritten.
+            Ticket pendingTicket = ticketRepository.findByIdForUpdate(pending.get().getId())
+                    .filter(locked -> locked.getStatus() == TicketStatus.PENDING_PAYMENT)
+                    .orElse(null);
+            pending = Optional.ofNullable(pendingTicket);
+        }
+        if (pending.isPresent()) {
             Ticket pendingTicket = pending.get();
             List<SeatReservationDto> liveTicketHolds =
                     seatReservationService.listLiveHeldSeatsOfTicket(pendingTicket.getId());
