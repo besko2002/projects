@@ -1,0 +1,185 @@
+# Production Docker Compose for HR Management System
+# Usage:
+#   docker compose -f docker-compose.prod.yml --env-file .env.production config --quiet
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: hr-prod-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN must be set (e.g. hr.company.com)}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL must be set for TLS certificate registration}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - frontend-net
+      - backend-net
+    depends_on:
+      frontend:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-ghcr.io/company/hr-management-frontend:latest}
+    container_name: hr-prod-frontend
+    restart: unless-stopped
+    networks:
+      - frontend-net
+    # No exposed host ports - traffic routes through Caddy
+    expose:
+      - "80"
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:80/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  app:
+    image: ${APP_IMAGE:-ghcr.io/company/hr-management-system:latest}
+    container_name: hr-prod-app
+    restart: unless-stopped
+    networks:
+      - backend-net
+      - db-net
+    # No exposed host ports - traffic routes through Caddy
+    expose:
+      - "8091"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-hr}
+      DB_USERNAME: ${DB_USERNAME:-hr}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be configured with a strong secret}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      SERVER_PORT: 8091
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (min 32 bytes)}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-PT8H}
+      HR_ADMIN_EMAIL: ${HR_ADMIN_EMAIL:-admin@company.com}
+      HR_ADMIN_PASSWORD: ${HR_ADMIN_PASSWORD:?HR_ADMIN_PASSWORD must be set for bootstrap admin}
+      LOGIN_RATE_LIMIT_STORE: redis
+      REDIS_HEALTH_ENABLED: "true"
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRINGDOC_ENABLED: "false"
+      LOG_LEVEL_APP: ${LOG_LEVEL_APP:-INFO}
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=50 -XX:+UseG1GC -XX:MaxMetaspaceSize=128m -Dspring.profiles.active=prod"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8091/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: hr-prod-postgres
+    restart: unless-stopped
+    networks:
+      - db-net
+    # No exposed host ports - only reachable within db-net
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_DB: ${DB_NAME:-hr}
+      POSTGRES_USER: ${DB_USERNAME:-hr}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
+    command:
+      - sh
+      - -c
+      - |
+        case "$$POSTGRES_PASSWORD" in
+          ""|hr|postgres|password|secret|changeme|change-me|admin|administrator|root|letmein|welcome|qwerty|123456|123456789|dbpassword|db_password|localdev|local-dev)
+            echo "POSTGRES_PASSWORD is missing or insecure. Terminating." >&2
+            exit 1
+            ;;
+        esac
+        if [ "$${#POSTGRES_PASSWORD}" -lt 12 ]; then
+          echo "POSTGRES_PASSWORD must be at least 12 characters long." >&2
+          exit 1
+        fi
+        exec docker-entrypoint.sh postgres
+    volumes:
+      - prod-postgres-data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-hr} -d ${DB_NAME:-hr}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: hr-prod-redis
+    restart: unless-stopped
+    networks:
+      - db-net
+    expose:
+      - "6379"
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "192mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - prod-redis-data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+networks:
+  frontend-net:
+    driver: bridge
+    internal: false
+  backend-net:
+    driver: bridge
+    internal: true
+  db-net:
+    driver: bridge
+    internal: true
+
+volumes:
+  prod-postgres-data:
+    name: hr-management-prod-postgres-data
+  prod-redis-data:
+    name: hr-management-prod-redis-data
+  caddy-data:
+    name: hr-management-prod-caddy-data
+  caddy-config:
+    name: hr-management-prod-caddy-config

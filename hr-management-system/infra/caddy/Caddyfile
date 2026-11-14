@@ -1,0 +1,66 @@
+# Caddyfile for HR Management System Production Deployment
+{
+    # Global options
+    admin off
+    email {$ACME_EMAIL:admin@example.com}
+}
+
+{$DOMAIN:hr.example.com} {
+    # Automatic HTTPS is enabled by default for valid domain names.
+    # Security response headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none';"
+        -Server
+    }
+
+    # Enable compression
+    encode gzip zstd
+
+    # Health check passthrough
+    handle /healthz {
+        respond "OK" 200
+    }
+
+    # Backend API and Actuator routing
+    handle /api/* {
+        reverse_proxy app:8091 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+        }
+    }
+
+    handle /actuator/* {
+        # Restrict actuator endpoints to private network or authenticated access if needed
+        reverse_proxy app:8091 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+        }
+    }
+
+    # Frontend Single Page Application routing
+    handle {
+        reverse_proxy frontend:80 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+        }
+    }
+
+    # Access logging with JSON formatting
+    log {
+        output stdout
+        format json
+        level INFO
+    }
+}
