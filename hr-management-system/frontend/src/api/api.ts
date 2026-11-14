@@ -241,11 +241,27 @@ export const api = {
       json: { managerId },
     }),
 
-  orgChart: (signal?: AbortSignal): Promise<OrgChartNode[]> =>
-    request<OrgChartNode[]>('/api/org-chart', { signal }),
+  orgChart: (
+    page?: number,
+    size?: number,
+    signal?: AbortSignal,
+  ): Promise<PageResponse<OrgChartNode>> => {
+    const q = page !== undefined && page > 0 ? query({ page, size: size ?? 50 }) : '';
+    return request<PageResponse<OrgChartNode>>(`/api/org-chart${q}`, { signal });
+  },
 
-  orgChartChildren: (employeeId: string, signal?: AbortSignal): Promise<OrgChartNode[]> =>
-    request<OrgChartNode[]>(`/api/org-chart/${seg(employeeId)}/children`, { signal }),
+  orgChartChildren: (
+    employeeId: string,
+    page?: number,
+    size?: number,
+    signal?: AbortSignal,
+  ): Promise<PageResponse<OrgChartNode>> => {
+    const q = page !== undefined && page > 0 ? query({ page, size: size ?? 50 }) : '';
+    return request<PageResponse<OrgChartNode>>(
+      `/api/org-chart/${seg(employeeId)}/children${q}`,
+      { signal },
+    );
+  },
 
   // ----------------------------------------------------------------- audit
   employeeAudit: (

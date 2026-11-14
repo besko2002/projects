@@ -156,4 +156,74 @@ describe('org chart', () => {
     expect(await screen.findByText('The org chart is empty.')).toBeInTheDocument();
     expect(screen.queryByRole('list', { name: 'Organisation chart' })).not.toBeInTheDocument();
   });
+
+  it('supports paged continuation for roots and child reports', async () => {
+    const user = userEvent.setup();
+    const SECOND_ROOT = makeOrgNode({ id: 'emp-10', fullName: 'Second Root', childCount: 0 });
+    const SECOND_CHILD = makeOrgNode({ id: 'emp-3', fullName: 'Second Child', childCount: 0 });
+
+    installFetchMock({
+      ...signedIn(),
+      'GET /api/org-chart': {
+        body: {
+          content: [ROOT],
+          page: 0,
+          size: 1,
+          totalElements: 2,
+          totalPages: 2,
+        },
+      },
+      'GET /api/org-chart?page=1&size=50': {
+        body: {
+          content: [SECOND_ROOT],
+          page: 1,
+          size: 1,
+          totalElements: 2,
+          totalPages: 2,
+        },
+      },
+      'GET /api/org-chart/emp-9/children': {
+        body: {
+          content: [NADIA],
+          page: 0,
+          size: 1,
+          totalElements: 2,
+          totalPages: 2,
+        },
+      },
+      'GET /api/org-chart/emp-9/children?page=1&size=50': {
+        body: {
+          content: [SECOND_CHILD],
+          page: 1,
+          size: 1,
+          totalElements: 2,
+          totalPages: 2,
+        },
+      },
+    });
+
+    renderApp('/org-chart');
+
+    // Page 0 root is visible
+    expect(await screen.findByText('Omar Said')).toBeInTheDocument();
+    // Load more roots button is visible
+    const loadMoreRootsBtn = await screen.findByRole('button', { name: /load more roots/i });
+    expect(loadMoreRootsBtn).toBeInTheDocument();
+
+    // Click load more roots
+    await user.click(loadMoreRootsBtn);
+    expect(await screen.findByText('Second Root')).toBeInTheDocument();
+
+    // Expand Omar Said
+    await user.click(screen.getByRole('button', { name: 'Expand the reports of Omar Said' }));
+    const tree = await screen.findByRole('list', { name: 'Organisation chart' });
+    expect(await within(tree).findByText('Nadia Hassan')).toBeInTheDocument();
+
+    // Load more reports button is visible
+    const loadMoreReportsBtn = await screen.findByRole('button', { name: /load more reports/i });
+    expect(loadMoreReportsBtn).toBeInTheDocument();
+
+    await user.click(loadMoreReportsBtn);
+    expect(await within(tree).findByText('Second Child')).toBeInTheDocument();
+  });
 });

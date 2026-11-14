@@ -10,8 +10,11 @@ import com.example.hr.employee.EmployeeStatus;
 import com.example.hr.employee.dto.ChainMemberResponse;
 import com.example.hr.employee.dto.EmployeeProfile;
 import com.example.hr.employee.dto.OrgChartNode;
+import com.example.hr.employee.dto.PageResponse;
 import com.example.hr.employee.dto.TeamMemberResponse;
 import com.example.hr.security.CurrentEmployee;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -98,38 +101,55 @@ public class HierarchyService {
 
     /**
      * The root level of the org chart: the employees without a manager, each with the number of
-     * its direct reports.
-     *
-     * <p>The chart is loaded level by level. Returning the whole company in one payload was
-     * 3.7 MB at 20,000 employees; the client now asks for the children of a node when it
-     * expands it, so every response stays small.
+     * its direct reports. Bounded pagination ensures stability for organizations with large numbers of roots.
      */
     @Transactional(readOnly = true)
-    public List<OrgChartNode> orgChartRoots() {
+    public PageResponse<OrgChartNode> orgChartRoots(int page, int size) {
         currentEmployee.require();
-        return toNodes(employees.findOrgChartRoots());
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(Math.max(1, size), 200);
+        Page<Object[]> paged = employees.findOrgChartRootsPaged(PageRequest.of(safePage, safeSize));
+        return PageResponse.of(paged, HierarchyService::toNode);
+    }
+
+    /** Direct unpaged root accessor for backward-compatibility with tests / internal queries. */
+    @Transactional(readOnly = true)
+    public List<OrgChartNode> orgChartRoots() {
+        return orgChartRoots(0, 50).content();
     }
 
     /**
      * The direct reports of one employee, each with the number of its own direct reports.
      *
      * @param employeeId the manager whose reports are asked for
-     * @return the direct reports, empty when the employee has none
+     * @param page zero-based page index
+     * @param size page size (bounded between 1 and 200)
+     * @return the paginated direct reports, empty when the employee has none
      */
     @Transactional(readOnly = true)
-    public List<OrgChartNode> orgChartChildren(UUID employeeId) {
+    public PageResponse<OrgChartNode> orgChartChildren(UUID employeeId, int page, int size) {
         currentEmployee.require();
         require(employeeId);
-        return toNodes(employees.findOrgChartChildren(employeeId));
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(Math.max(1, size), 200);
+        Page<Object[]> paged = employees.findOrgChartChildrenPaged(employeeId, PageRequest.of(safePage, safeSize));
+        return PageResponse.of(paged, HierarchyService::toNode);
     }
 
-    private static List<OrgChartNode> toNodes(List<Object[]> rows) {
-        List<OrgChartNode> nodes = new ArrayList<>(rows.size());
-        for (Object[] row : rows) {
-            nodes.add(new OrgChartNode((UUID) row[0], (String) row[1], (String) row[2], (String) row[3],
-                    (String) row[4], ((Number) row[5]).intValue()));
-        }
-        return nodes;
+    /** Direct unpaged children accessor for backward-compatibility with tests / internal queries. */
+    @Transactional(readOnly = true)
+    public List<OrgChartNode> orgChartChildren(UUID employeeId) {
+        return orgChartChildren(employeeId, 0, 50).content();
+    }
+
+    private static OrgChartNode toNode(Object[] row) {
+        return new OrgChartNode(
+                (UUID) row[0],
+                (String) row[1],
+                (String) row[2],
+                (String) row[3],
+                (String) row[4],
+                ((Number) row[5]).intValue());
     }
 
     private Employee require(UUID id) {

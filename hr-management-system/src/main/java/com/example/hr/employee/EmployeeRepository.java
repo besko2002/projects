@@ -1,5 +1,6 @@
 package com.example.hr.employee;
 
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -221,8 +222,8 @@ public interface EmployeeRepository extends JpaRepository<Employee, UUID>, JpaSp
 
     /**
      * The root level of the org chart: the employees without a manager, each with the number of
-     * its direct reports. The client fetches the children of a node when it expands it, so the
-     * payload stays small no matter how big the company is.
+     * its direct reports. Bounded pagination ensures the response remains efficient even with
+     * thousands of roots.
      * Columns: id, employee_number, full_name, job_title, department name, direct report count.
      */
     @Query(value = """
@@ -233,15 +234,19 @@ public interface EmployeeRepository extends JpaRepository<Employee, UUID>, JpaSp
              where e.manager_id is null
                and e.status = 'ACTIVE'
              group by e.id, e.employee_number, e.full_name, e.job_title, d.name
-             order by e.full_name
-             limit 500
-            """, nativeQuery = true)
-    List<Object[]> findOrgChartRoots();
+             order by e.full_name, e.id
+            """,
+            countQuery = """
+            select count(*) from employees e
+             where e.manager_id is null
+               and e.status = 'ACTIVE'
+            """,
+            nativeQuery = true)
+    Page<Object[]> findOrgChartRootsPaged(Pageable pageable);
 
     /**
-     * The direct reports of one employee, each with the number of ITS direct reports - so a
-     * level can be drawn without knowing the rest of the tree. Bounded to 500 reports to prevent
-     * unbounded payloads for massive branches.
+     * The direct reports of one employee, each with the number of ITS direct reports.
+     * Bounded pagination ensures large teams can be navigated page-by-page.
      * Columns: id, employee_number, full_name, job_title, department name, direct report count.
      */
     @Query(value = """
@@ -252,8 +257,13 @@ public interface EmployeeRepository extends JpaRepository<Employee, UUID>, JpaSp
              where e.manager_id = :managerId
                and e.status = 'ACTIVE'
              group by e.id, e.employee_number, e.full_name, e.job_title, d.name
-             order by e.full_name
-             limit 500
-            """, nativeQuery = true)
-    List<Object[]> findOrgChartChildren(@Param("managerId") UUID managerId);
+             order by e.full_name, e.id
+            """,
+            countQuery = """
+            select count(*) from employees e
+             where e.manager_id = :managerId
+               and e.status = 'ACTIVE'
+            """,
+            nativeQuery = true)
+    Page<Object[]> findOrgChartChildrenPaged(@Param("managerId") UUID managerId, Pageable pageable);
 }
