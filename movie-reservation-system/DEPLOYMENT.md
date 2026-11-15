@@ -60,6 +60,11 @@ When running behind a reverse proxy or load balancer, ensure Spring Boot trusts 
 ```yaml
 server:
   forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      remote-ip-header: x-forwarded-for
+      protocol-header: x-forwarded-proto
+      internal-proxies: '10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}|::1|0:0:0:0:0:0:0:1'
 ```
 
 ### Sample Nginx Configuration Snippet

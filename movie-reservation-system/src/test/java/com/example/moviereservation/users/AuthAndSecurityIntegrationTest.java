@@ -236,6 +236,28 @@ class AuthAndSecurityIntegrationTest {
     }
 
     @Test
+    void spoofedXForwardedForHeaderDoesNotBypassRateLimit() throws Exception {
+        String email = uniqueEmail();
+        register(email);
+        String ip = "192.0.2.55";
+        for (int attempt = 0; attempt < 5; attempt++) {
+            mockMvc.perform(post("/api/auth/login")
+                            .with(request -> { request.setRemoteAddr(ip); return request; })
+                            .header("X-Forwarded-For", "203.0.113." + attempt)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(loginBody(email, "WrongPassword1!")))
+                    .andExpect(status().isUnauthorized());
+        }
+        mockMvc.perform(post("/api/auth/login")
+                        .with(request -> { request.setRemoteAddr(ip); return request; })
+                        .header("X-Forwarded-For", "203.0.113.99")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginBody(email, PASSWORD)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.status").value(429));
+    }
+
+    @Test
     void paymentReturnPagesArePublicAndRevealNoTicketDetails() throws Exception {
         mockMvc.perform(get("/payment/success")).andExpect(status().isOk())
                 .andExpect(content().string(containsString("Payment submitted")));
