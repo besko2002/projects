@@ -3,6 +3,9 @@ package com.example.hr.attendance;
 import com.example.hr.employee.Role;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.Instant;
@@ -19,6 +22,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Independent request transactions must serialize on the employee even when no session exists yet. */
 class AttendanceWriteConcurrencyIntegrationTest extends AbstractAttendanceIntegrationTest {
+    @Autowired AttendanceSessionRepository sessions;
+    @Autowired PlatformTransactionManager transactionManager;
     private String hrToken;
     private String staffToken;
     private NewEmployee staff;
@@ -42,19 +47,41 @@ class AttendanceWriteConcurrencyIntegrationTest extends AbstractAttendanceIntegr
     }
 
     @Test
-    void concurrentMutualCorrectionBetweenHrEmployeesCannotDeadlockWithHttp500() throws Exception {
+    void concurrentMutualCorrectionCommitsBothRowsAfterBothEmployeeLocksAreHeld() throws Exception {
         String admin = adminToken();
         NewEmployee hrA = createEmployee(admin, "Alice HR", Role.HR, null);
         NewEmployee hrB = createEmployee(admin, "Bob HR", Role.HR, null);
         String tokenA = login(hrA.email(), hrA.password());
         String tokenB = login(hrB.email(), hrB.password());
 
+        CountDownLatch locked = new CountDownLatch(2);
+        var backends = java.util.concurrent.ConcurrentHashMap.<Integer>newKeySet();
         List<Integer> statuses = race(
-                () -> code(addSession(tokenA, hrB.id(), at(march(4), "09:00"), at(march(4), "12:00"), "A corrects B")),
-                () -> code(addSession(tokenB, hrA.id(), at(march(4), "09:00"), at(march(4), "12:00"), "B corrects A")));
+                () -> lockedCorrection(tokenA, hrB.id(), locked, backends),
+                () -> lockedCorrection(tokenB, hrA.id(), locked, backends));
 
-        assertThat(statuses).allSatisfy(status -> assertThat(status).isIn(201, 409));
-        assertThat(statuses).doesNotContain(500);
+        assertThat(backends).hasSize(2); // two independent JDBC connections/transactions
+        assertThat(statuses).containsExactly(201, 201);
+        assertThat(jdbc.queryForObject("select count(*) from attendance_sessions where employee_id = ? and corrected_by = ?",
+                Long.class, hrB.id(), hrA.id())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from attendance_sessions where employee_id = ? and corrected_by = ?",
+                Long.class, hrA.id(), hrB.id())).isEqualTo(1);
+    }
+
+    private int lockedCorrection(String token, UUID target, CountDownLatch locked, java.util.Set<Integer> backends) {
+        return new TransactionTemplate(transactionManager).execute(transaction -> {
+            jdbc.execute("set local lock_timeout = '5s'");
+            backends.add(jdbc.queryForObject("select pg_backend_pid()", Integer.class));
+            assertThat(sessions.lockEmployee(target)).isPresent();
+            locked.countDown();
+            try {
+                // Neither request can insert its cross-employee FK until BOTH target locks exist.
+                assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+                return code(addSession(token, target, at(march(4), "09:00"), at(march(4), "12:00"), "mutual correction"));
+            } catch (Exception ex) {
+                throw new IllegalStateException("Concurrent correction failed", ex);
+            }
+        });
     }
 
     @Test
