@@ -21,19 +21,34 @@ export function HomePage(): React.JSX.Element {
   const [referenceTime] = useState<number>(() => Date.now());
 
   const [movies, setMovies] = useState<MovieSummary[]>([]);
-  const [schedules, setSchedules] = useState<ScheduleSummary[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loadedGenre, setLoadedGenre] = useState<string | null | undefined>(undefined);
+  const [rawSchedules, setRawSchedules] = useState<ScheduleSummary[]>([]);
+  const [loadedDate, setLoadedDate] = useState<string | null>(null);
+
   const [catalogueError, setCatalogueError] = useState<string | null>(null);
   const [schedulesError, setSchedulesError] = useState<string | null>(null);
+  const [catalogueRetry, setCatalogueRetry] = useState<number>(0);
+  const [schedulesRetry, setSchedulesRetry] = useState<number>(0);
+
+  // Derived loading states without synchronous setState in effects (React 19 / ESLint)
+  const loading = (loadedGenre !== selectedGenre && !catalogueError) || loadedGenre === undefined;
+  const schedulesLoading = loadedDate !== selectedDate && !schedulesError;
+  const schedules = useMemo(() => {
+    return loadedDate === selectedDate ? rawSchedules : [];
+  }, [loadedDate, selectedDate, rawSchedules]);
 
   const handleSelectGenre = (genre: string | null) => {
+    if (genre === selectedGenre) {
+      // Issue 5: clicking the already-selected genre does not trigger a re-fetch; do not set loading
+      return;
+    }
     setSelectedGenre(genre);
-    setLoading(true);
   };
 
-  // Load genres and movies with ignore flag and genre filter (P2-3, P2-4)
+  // Load genres and movies with ignore flag and genre filter (P2-3, P2-4, Issue 5)
   useEffect(() => {
     let ignore = false;
+
     Promise.all([
       moviesApi.getGenres(),
       moviesApi.getMovies({ genre: selectedGenre ?? undefined, size: 100 }),
@@ -42,22 +57,23 @@ export function HomePage(): React.JSX.Element {
         if (!ignore) {
           setGenres(genresData);
           setMovies(moviesData.content);
-          setLoading(false);
+          setLoadedGenre(selectedGenre);
+          setCatalogueError(null);
         }
       })
       .catch((err) => {
         if (!ignore) {
           setCatalogueError(err instanceof Error ? err.message : 'Failed to load movie catalogue');
-          setLoading(false);
+          setLoadedGenre(selectedGenre);
         }
       });
 
     return () => {
       ignore = true;
     };
-  }, [selectedGenre]);
+  }, [selectedGenre, catalogueRetry]);
 
-  // Load schedules using local day bounds (P2-2, P2-3)
+  // Load schedules using local day bounds (P2-2, P2-3, Issue 6)
   useEffect(() => {
     let ignore = false;
     if (!selectedDate) return;
@@ -75,12 +91,15 @@ export function HomePage(): React.JSX.Element {
       })
       .then((data) => {
         if (!ignore) {
-          setSchedules(data.content);
+          setRawSchedules(data.content);
+          setLoadedDate(selectedDate);
           setSchedulesError(null);
         }
       })
       .catch((err) => {
         if (!ignore) {
+          setRawSchedules([]);
+          setLoadedDate(selectedDate);
           setSchedulesError(err instanceof Error ? err.message : 'Failed to load showtimes');
         }
       });
@@ -88,7 +107,7 @@ export function HomePage(): React.JSX.Element {
     return () => {
       ignore = true;
     };
-  }, [selectedDate]);
+  }, [selectedDate, schedulesRetry]);
 
   // Map schedules by movieId (filtering out already-started shows for booking - P2-2)
   const schedulesByMovie = useMemo(() => {
@@ -146,14 +165,46 @@ export function HomePage(): React.JSX.Element {
         <h1>Now playing</h1>
 
         {catalogueError && (
-          <div className="error-banner" role="alert" style={{ marginTop: 'var(--space-4)' }}>
-            {catalogueError}
+          <div
+            className="error-banner"
+            role="alert"
+            style={{
+              marginTop: 'var(--space-4)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <span>{catalogueError}</span>
+            <button
+              type="button"
+              className="btn btn-compact"
+              onClick={() => setCatalogueRetry((r) => r + 1)}
+            >
+              Retry
+            </button>
           </div>
         )}
 
         {schedulesError && (
-          <div className="error-banner" role="alert" style={{ marginTop: 'var(--space-4)' }}>
-            {schedulesError}
+          <div
+            className="error-banner"
+            role="alert"
+            style={{
+              marginTop: 'var(--space-4)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <span>{schedulesError}</span>
+            <button
+              type="button"
+              className="btn btn-compact"
+              onClick={() => setSchedulesRetry((r) => r + 1)}
+            >
+              Retry
+            </button>
           </div>
         )}
 
@@ -245,6 +296,7 @@ export function HomePage(): React.JSX.Element {
                 movie={m}
                 schedules={schedulesByMovie.get(m.id) || []}
                 genresLabel={selectedGenre || undefined}
+                isLoading={schedulesLoading}
               />
             ))}
           </div>

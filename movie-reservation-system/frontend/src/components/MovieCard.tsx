@@ -9,12 +9,14 @@ interface MovieCardProps {
   movie: MovieSummary;
   schedules?: ScheduleSummary[];
   genresLabel?: string;
+  isLoading?: boolean;
 }
 
 export function MovieCard({
   movie,
   schedules = [],
   genresLabel,
+  isLoading = false,
 }: MovieCardProps): React.JSX.Element {
   const [referenceTime] = React.useState<number>(() => Date.now());
   const colorIndex = (movie.id % 4) + 1; // 1..4 -> p1..p4
@@ -70,7 +72,13 @@ export function MovieCard({
           )}
         </div>
 
-        {activeSchedules.length > 0 ? (
+        {isLoading ? (
+          <div className="times-empty">
+            <span className="faint" style={{ fontSize: '13px' }}>
+              Loading showtimes...
+            </span>
+          </div>
+        ) : activeSchedules.length > 0 ? (
           <div className="times" aria-label={`Showtimes for ${movie.title}`}>
             {activeSchedules.slice(0, 4).map((s) => (
               <Link

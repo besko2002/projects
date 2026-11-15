@@ -20,14 +20,22 @@ export function MovieDetailPage(): React.JSX.Element {
   const [selectedDate, setSelectedDate] = useState<string>(days[0]?.dateString ?? '');
 
   const [movie, setMovie] = useState<MovieDto | null>(null);
-  const [schedules, setSchedules] = useState<ScheduleSummary[]>([]);
+  const [rawSchedules, setRawSchedules] = useState<ScheduleSummary[]>([]);
+  const [loadedDate, setLoadedDate] = useState<string | null>(null);
   const [selectedScheduleId, setSelectedScheduleId] = useState<number | null>(null);
   const [loading, setLoading] = useState<boolean>(!isInvalidId);
   const [movieError, setMovieError] = useState<string | null>(
     isInvalidId ? 'Invalid movie reference.' : null,
   );
   const [schedulesError, setSchedulesError] = useState<string | null>(null);
+  const [schedulesRetry, setSchedulesRetry] = useState<number>(0);
   const [referenceTime] = useState<number>(() => Date.now());
+
+  // Derived showtimes and loading state without synchronous setState in effects
+  const schedulesLoading = loadedDate !== selectedDate && !schedulesError;
+  const schedules = useMemo(() => {
+    return loadedDate === selectedDate ? rawSchedules : [];
+  }, [loadedDate, selectedDate, rawSchedules]);
 
   // Load movie details with ignore flag (P2-3)
   useEffect(() => {
@@ -54,7 +62,7 @@ export function MovieDetailPage(): React.JSX.Element {
     };
   }, [movieId, isInvalidId]);
 
-  // Load schedules using user's local day bounds with ignore flag (P2-2, P2-3)
+  // Load schedules using user's local day bounds with ignore flag (P2-2, P2-3, Issue 6)
   useEffect(() => {
     let ignore = false;
     if (isInvalidId || !selectedDate) return;
@@ -72,10 +80,17 @@ export function MovieDetailPage(): React.JSX.Element {
       })
       .then((data) => {
         if (!ignore) {
-          setSchedules(data.content);
+          setRawSchedules(data.content);
+          setLoadedDate(selectedDate);
           setSchedulesError(null);
-          if (data.content.length > 0) {
-            setSelectedScheduleId(data.content[0].id);
+
+          // Select only a future, bookable showtime (Issue 6)
+          const now = Date.now();
+          const futureSchedules = data.content.filter(
+            (s) => new Date(s.startTime).getTime() > now,
+          );
+          if (futureSchedules.length > 0) {
+            setSelectedScheduleId(futureSchedules[0].id);
           } else {
             setSelectedScheduleId(null);
           }
@@ -83,15 +98,17 @@ export function MovieDetailPage(): React.JSX.Element {
       })
       .catch((err) => {
         if (!ignore) {
+          setRawSchedules([]);
+          setLoadedDate(selectedDate);
+          setSelectedScheduleId(null);
           setSchedulesError(err instanceof Error ? err.message : 'Failed to load showtimes');
-          setSchedules([]);
         }
       });
 
     return () => {
       ignore = true;
     };
-  }, [movieId, selectedDate, isInvalidId]);
+  }, [movieId, selectedDate, isInvalidId, schedulesRetry]);
 
   // Group schedules by theater
   const schedulesByTheater = useMemo(() => {
@@ -197,15 +214,35 @@ export function MovieDetailPage(): React.JSX.Element {
             </div>
 
             {schedulesError && (
-              <div className="error-banner" role="alert" style={{ marginTop: 'var(--space-4)' }}>
-                {schedulesError}
+              <div
+                className="error-banner"
+                role="alert"
+                style={{
+                  marginTop: 'var(--space-4)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <span>{schedulesError}</span>
+                <button
+                  type="button"
+                  className="btn btn-compact"
+                  onClick={() => setSchedulesRetry((r) => r + 1)}
+                >
+                  Retry
+                </button>
               </div>
             )}
 
             <div style={{ marginTop: 'var(--space-6)' }}>
               <h2>Available halls &amp; showtimes</h2>
 
-              {schedules.length === 0 && !schedulesError ? (
+              {schedulesLoading ? (
+                <div style={{ marginTop: 'var(--space-4)' }}>
+                  <div className="skeleton" style={{ height: '100px', border: '3px solid var(--ink)' }} />
+                </div>
+              ) : schedules.length === 0 && !schedulesError ? (
                 <div
                   style={{
                     padding: 'var(--space-8)',
@@ -265,8 +302,8 @@ export function MovieDetailPage(): React.JSX.Element {
               )}
             </div>
 
-            {/* Action Bar */}
-            {selectedSchedule && (
+            {/* Action Bar: only enabled for future, bookable showtimes (Issue 6) */}
+            {selectedSchedule && new Date(selectedSchedule.startTime).getTime() > referenceTime && (
               <div
                 style={{
                   marginTop: 'var(--space-8)',
