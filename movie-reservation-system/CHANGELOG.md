@@ -12,6 +12,20 @@ All notable changes to the Movie Reservation System backend are documented in th
   (`findByIdForUpdate`) and re-checks `PENDING_PAYMENT` before changing it, like every other ticket
   transition, so a concurrent webhook result is never overwritten.
 
+- **Refund Idempotency Key Collision (found by a live Stripe test)**: The Stripe refund key was
+  `ticket-{id}-refund`. Ticket ids restart in every database while Stripe idempotency keys are
+  account-wide, so after a database reset/restore, or with several environments on one Stripe account,
+  a refund reused a key from an earlier, different payment and Stripe refused it
+  (`IdempotencyException`), leaving the ticket PAID. The key is now
+  `refund-{paymentIntentId}-{amount}`: unique per payment, still stable across retries. Regression
+  test: `RefundKeyTest`.
+
+### Added (testing)
+- **Docker-free test runs**: `python3 scripts/native.py test movies` runs the full suite against a
+  fresh, uniquely named database per test context on the native PostgreSQL server
+  (`NativeTestDatabase`), dropped afterwards. Without `MOVIE_TEST_DB_URL` the tests still use
+  Testcontainers, so CI is unchanged. Verified: 209 tests, 0 failures, with Docker stopped.
+
 ### Verified
 - **Live Stripe test mode (manual, 2026-11-14)**: against an isolated instance and throwaway database,
   a real Stripe Checkout session was paid with test card 4242 ($25.00 succeeded), the signed
@@ -33,7 +47,7 @@ All notable changes to the Movie Reservation System backend are documented in th
   - `sessionExpiredMarksTicketExpiredAndReleasesSeats`: Verifies `checkout.session.expired` webhook transitions ticket to `EXPIRED` and frees seats for re-booking.
   - `outOfOrderExpiredAfterCompletedIsIgnored`: Verifies late `checkout.session.expired` webhook received after `checkout.session.completed` is ignored without altering `PAID` ticket or `CONFIRMED` seats.
   - `outOfOrderCompletedAfterExpiredRefundsExactlyOnce`: Verifies late `checkout.session.completed` webhook for an expired ticket issues an automatic refund exactly once and ignores duplicate deliveries.
-- **Refund Gateway Failure & Retry Resilience Tests**: Added `refundRetriesStayConsistentWhenProviderFails` in `TicketCancellationIntegrationTest` demonstrating transactional rollback when the payment gateway fails (e.g., HTTP 503) during ticket cancellation, followed by consistent retry using the deterministic idempotency key (`ticket-{id}-refund`).
+- **Refund Gateway Failure & Retry Resilience Tests**: Added `refundRetriesStayConsistentWhenProviderFails` in `TicketCancellationIntegrationTest` demonstrating transactional rollback when the payment gateway fails (e.g., HTTP 503) during ticket cancellation, followed by consistent retry using the deterministic idempotency key (now `refund-{paymentIntentId}-{amount}`).
 - **OpenAPI Schema Regression Tests**: Added schema assertions in `ApiDocsTest` to prevent regressions on endpoint authentication metadata and response status codes.
 
 ### Changed

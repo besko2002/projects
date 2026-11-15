@@ -426,7 +426,9 @@ JAVA_HOME=$(/usr/libexec/java_home -v 21) ./mvnw clean verify
 ```
 
 Unit tests plus `@SpringBootTest` integration tests that start a **real PostgreSQL 16 via
-Testcontainers** — Docker must be running. No test ever calls Stripe over the network: every payment
+Testcontainers** — Docker must be running. Without Docker, run the same suite against throwaway
+databases on the native PostgreSQL server: `python3 scripts/native.py test movies` from the
+repository root (see [NATIVE.md](../NATIVE.md)). No test ever calls Stripe over the network: every payment
 goes through the `PaymentGateway` port, which is stubbed in tests. The suite covers the late-payment
 refund, concurrent checkout, unpaid and async payment events, amount and session mismatches, partial
 refunds, the per-user seat cap and the production-secret guard.

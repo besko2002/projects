@@ -107,6 +107,20 @@ def main():
         if name == 'ai':
             sql('CREATE EXTENSION IF NOT EXISTS vector;', database)
         print(f'Prepared native {name}: database={database}, API port={port}; secrets not printed.')
+    # Docker-free test runs: a role that may only create (and drop its own) throwaway databases.
+    tests_path = native.HOME / 'config' / 'tests.json'
+    if tests_path.exists():
+        tests = json.loads(tests_path.read_text())
+    else:
+        tests = {'username': 'native_test', 'password': secrets.token_urlsafe(32)}
+        with tests_path.open('x') as file:
+            json.dump(tests, file, indent=2)
+            file.write('\n')
+        tests_path.chmod(0o600)
+    if not sql(f'select 1 from pg_roles where rolname={quoted(tests["username"])};'):
+        sql(f'CREATE ROLE "{tests["username"]}" LOGIN CREATEDB NOSUPERUSER NOCREATEROLE '
+            f'PASSWORD {quoted(tests["password"])};')
+    print('Prepared native test role (CREATEDB only); secrets not printed.')
     print('Setup complete. Existing roles/configurations/databases were not overwritten.')
 
 

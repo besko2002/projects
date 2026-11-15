@@ -135,6 +135,60 @@ def build(name):
     run([project / 'mvnw', '-B', '-q', '-Dmaven.test.skip=true', 'package'], cwd=project, env=env)
 
 
+TEST_DB_PREFIX = {'movies': 'movie_test_'}
+
+
+def drop_leftover_test_databases(prefix, owner):
+    """Drops test databases a crashed run left behind; only this prefix and owner, never others."""
+    if not prefix.endswith('_test_') or not prefix.replace('_', '').isalnum():
+        raise ValueError('Unsafe test database prefix')
+    psql = [PG_BIN / 'psql', '-X', '-h', HOME / 'socket', '-p', str(PG_PORT), '-U', 'native_admin',
+            '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-Atq', '-c']
+    query = ("select d.datname from pg_database d join pg_roles r on r.oid = d.datdba "
+             f"where d.datname like '{prefix}%' and r.rolname = '{owner}'")
+    names = subprocess.run([str(x) for x in psql] + [query], check=True, capture_output=True,
+                           text=True).stdout.split()
+    for db in names:
+        if db.startswith(prefix) and db[len(prefix):].isalnum():
+            run(psql + [f'DROP DATABASE IF EXISTS "{db}" WITH (FORCE)'])
+    return len(names)
+
+
+def test(name):
+    """Runs a project's full test suite against throwaway native databases (no Docker)."""
+    if name not in TEST_DB_PREFIX:
+        raise RuntimeError(f'Native (Docker-free) tests are not set up for {name} yet.')
+    path = HOME / 'config' / 'tests.json'
+    if not path.is_file():
+        raise RuntimeError('Missing native test configuration; run python3 scripts/setup-native.py.')
+    creds = json.loads(path.read_text())
+    if not (JAVA_HOME / 'bin/java').is_file():
+        raise RuntimeError('Java 21 is not installed; set JAVA_HOME. See NATIVE.md.')
+    start_pg()
+    project = ROOT / APPS[name][0]
+    # Deliberately NOT the app's private config: tests must never see real Stripe keys.
+    env = {k: v for k, v in os.environ.items() if not k.startswith(('STRIPE_', 'DB_', 'JWT_'))}
+    env.update(JAVA_HOME=str(JAVA_HOME), PATH=str(JAVA_HOME / 'bin') + os.pathsep + env.get('PATH', ''),
+               MAVEN_OPTS='-Xmx384m',
+               MOVIE_TEST_DB_URL=f'jdbc:postgresql://127.0.0.1:{PG_PORT}/postgres',
+               MOVIE_TEST_DB_USERNAME=creds['username'], MOVIE_TEST_DB_PASSWORD=creds['password'],
+               # Each cached test context owns a database and a pool. The shared server also serves
+               # the running native apps, so pools open connections on demand and only one test
+               # context is cached at a time (peak ~20 connections from tests).
+               SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE='10',
+               SPRING_DATASOURCE_HIKARI_MINIMUMIDLE='1',
+               SPRING_DATASOURCE_HIKARI_IDLETIMEOUT='10000')
+    try:
+        # The 'test' phase never repackages the jar, so a running native app is not disturbed.
+        run([project / 'mvnw', '-B', '-q', 'test',
+             '-DargLine=-Xmx512m -Dspring.test.context.cache.maxSize=1'], cwd=project, env=env)
+    finally:
+        left = drop_leftover_test_databases(TEST_DB_PREFIX[name], creds['username'])
+        if left:
+            print(f'Dropped {left} leftover test database(s).')
+    print(f'{name}: all tests passed against native PostgreSQL (reports: {project / "target/surefire-reports"})')
+
+
 def start(name):
     directory, api_port, ui_port = APPS[name]
     project = ROOT / directory
@@ -186,7 +240,7 @@ def stop(name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['start', 'stop', 'status', 'build'])
+    parser.add_argument('action', choices=['start', 'stop', 'status', 'build', 'test'])
     parser.add_argument('project', choices=list(APPS) + ['all', 'postgres'])
     args = parser.parse_args()
     if args.project == 'postgres':
@@ -203,12 +257,14 @@ def main():
             raise RuntimeError('PostgreSQL is installed separately, not built by this launcher.')
         return
     names = list(APPS) if args.project == 'all' else [args.project]
+    if args.action == 'test' and args.project == 'all':
+        names = list(TEST_DB_PREFIX)
     for name in names:
         if args.action == 'status':
             print(name, 'api=' + ('running' if managed(name + '-api') else 'stopped'),
                   'ui=' + ('running' if managed(name + '-ui') else 'stopped'))
         else:
-            {'start': start, 'stop': stop, 'build': build}[args.action](name)
+            {'start': start, 'stop': stop, 'build': build, 'test': test}[args.action](name)
 
 
 if __name__ == '__main__':

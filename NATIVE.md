@@ -52,6 +52,21 @@ Passwords and API keys are not printed. The native JSON config is data, not a sh
 Build commands package current application code without running the integration suites.
 Run tests separately when needed; this does not mean the tests have passed.
 
+## Run the tests without Docker
+
+```bash
+python3 scripts/native.py test movies
+```
+
+The movie test suite normally starts a throwaway PostgreSQL container per test context
+(Testcontainers, which needs Docker; GitHub CI still does this). The `test` command instead gives
+each test context its own empty database on the native PostgreSQL server and drops it afterwards,
+so Docker can stay off. It uses the `native_test` role created by `setup-native.py`, which may
+only create databases (no superuser rights; credentials in private `config/tests.json`). It runs
+Maven's `test` phase, which does not repackage the jar, so a running native app is not disturbed,
+and it never passes the app's Stripe keys to the tests. Leftover `movie_test_*` databases from an
+interrupted run are dropped at the end. Other projects still need Docker for their test suites.
+
 ## Start only the project you need
 
 ```bash
