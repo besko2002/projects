@@ -69,20 +69,25 @@ public class AuthRateLimiter {
     }
 
     public void forgotPassword(String ip, String email) {
-        increment("forgot-ip:" + ip, 15, true);
+        increment("forgot-ip:" + ip, 15, this.windowMillis, true);
         if (email != null && !email.isBlank()) {
-            increment("forgot-email:" + normalise(email), 5, true);
+            // Per-email limit: at most 3 requests per 15 minutes to prevent spamming victim's mailbox
+            increment("forgot-email:" + normalise(email), 3, Duration.ofMinutes(15).toMillis(), true);
         }
     }
 
     public void resetPassword(String ip) {
-        increment("reset:" + ip, 10, true);
+        increment("reset:" + ip, 10, this.windowMillis, true);
     }
 
     private void increment(String key, int limit, boolean rejectBeforeIncrement) {
+        increment(key, limit, this.windowMillis, rejectBeforeIncrement);
+    }
+
+    private void increment(String key, int limit, long customWindowMillis, boolean rejectBeforeIncrement) {
         long now = clock.millis();
         Window state = windows.compute(key, (unused, old) -> {
-            if (old == null || old.startedAt + windowMillis <= now) {
+            if (old == null || old.startedAt + customWindowMillis <= now) {
                 return new Window(now, 1);
             }
             return new Window(old.startedAt, Math.min(old.count + 1, limit + 1));
@@ -102,7 +107,7 @@ public class AuthRateLimiter {
         }
         // Expired keys are pruned periodically so arbitrary email probes cannot grow this map forever.
         if (requests.incrementAndGet() % 128 == 0) {
-            windows.entrySet().removeIf(entry -> entry.getValue().startedAt + windowMillis <= now);
+            windows.entrySet().removeIf(entry -> entry.getValue().startedAt + Math.max(windowMillis, Duration.ofMinutes(15).toMillis()) <= now);
         }
     }
 

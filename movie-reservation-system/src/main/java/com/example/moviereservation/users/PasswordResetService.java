@@ -8,7 +8,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -19,6 +23,8 @@ import java.time.OffsetDateTime;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 @Service
 public class PasswordResetService {
@@ -34,6 +40,8 @@ public class PasswordResetService {
     private final PasswordEncoder passwordEncoder;
     private final String frontendBaseUrl;
     private final Clock clock;
+    private final TransactionTemplate transactionTemplate;
+    private final Executor emailExecutor;
     private final SecureRandom secureRandom = new SecureRandom();
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -41,8 +49,12 @@ public class PasswordResetService {
                                 PasswordResetTokenRepository tokenRepository,
                                 EmailSender emailSender,
                                 PasswordEncoder passwordEncoder,
+                                TransactionTemplate transactionTemplate,
+                                @org.springframework.beans.factory.annotation.Qualifier("applicationTaskExecutor")
+                                @org.springframework.beans.factory.annotation.Autowired(required = false) Executor emailExecutor,
                                 @Value("${app.email.frontend-base-url:http://localhost:5177}") String frontendBaseUrl) {
-        this(userRepository, tokenRepository, emailSender, passwordEncoder, frontendBaseUrl, Clock.systemUTC());
+        this(userRepository, tokenRepository, emailSender, passwordEncoder, frontendBaseUrl, Clock.systemUTC(),
+                transactionTemplate, emailExecutor);
     }
 
     public PasswordResetService(UserRepository userRepository,
@@ -51,12 +63,35 @@ public class PasswordResetService {
                                 PasswordEncoder passwordEncoder,
                                 String frontendBaseUrl,
                                 Clock clock) {
+        this(userRepository, tokenRepository, emailSender, passwordEncoder, frontendBaseUrl, clock, null, null);
+    }
+
+    public PasswordResetService(UserRepository userRepository,
+                                PasswordResetTokenRepository tokenRepository,
+                                EmailSender emailSender,
+                                PasswordEncoder passwordEncoder,
+                                String frontendBaseUrl,
+                                Clock clock,
+                                TransactionTemplate transactionTemplate,
+                                Executor emailExecutor) {
         this.userRepository = userRepository;
         this.tokenRepository = tokenRepository;
         this.emailSender = emailSender;
         this.passwordEncoder = passwordEncoder;
         this.frontendBaseUrl = frontendBaseUrl == null ? "http://localhost:5177" : frontendBaseUrl.trim();
         this.clock = clock;
+        if (transactionTemplate != null) {
+            TransactionTemplate requiresNew = new TransactionTemplate(transactionTemplate.getTransactionManager());
+            requiresNew.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            this.transactionTemplate = requiresNew;
+        } else {
+            this.transactionTemplate = null;
+        }
+        this.emailExecutor = emailExecutor != null ? emailExecutor : Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "password-reset-email");
+            t.setDaemon(true);
+            return t;
+        });
     }
 
     public boolean isPasswordResetConfigured() {
@@ -78,9 +113,6 @@ public class PasswordResetService {
         if (userOpt.isPresent()) {
             User user = userOpt.get();
             if (user.isEnabled()) {
-                // Invalidate all previous unused tokens for this user
-                tokenRepository.invalidateAllForUser(user.getId());
-
                 // Generate cryptographically secure random token (32 bytes = 64 hex characters)
                 byte[] bytes = new byte[TOKEN_BYTE_LENGTH];
                 secureRandom.nextBytes(bytes);
@@ -94,9 +126,26 @@ public class PasswordResetService {
                 String cleanBase = frontendBaseUrl.replaceAll("/+$", "");
                 String resetLink = cleanBase + "/reset-password#token=" + rawToken;
 
-                // Send email; raw token is NEVER logged
-                emailSender.sendPasswordReset(user.getEmail(), resetLink);
-                log.info("Issued password reset token for user id={}", user.getId());
+                Long userId = user.getId();
+                Long tokenId = token.getId();
+                String toEmail = user.getEmail();
+
+                // Dispatch email outside the DB transaction after commit
+                executeAfterCommit(() -> {
+                    try {
+                        emailSender.sendPasswordReset(toEmail, resetLink);
+                        // Once new email has been accepted by the email provider, invalidate older tokens
+                        if (transactionTemplate != null) {
+                            transactionTemplate.executeWithoutResult(status ->
+                                    tokenRepository.invalidatePriorTokensForUser(userId, tokenId));
+                        } else {
+                            tokenRepository.invalidatePriorTokensForUser(userId, tokenId);
+                        }
+                        log.info("Issued password reset token and dispatched email for user id={}", userId);
+                    } catch (Exception ex) {
+                        log.error("Failed to send password reset email to {}: {}", toEmail, ex.getMessage());
+                    }
+                });
             } else {
                 log.warn("Password reset requested for disabled user id={}", user.getId());
             }
@@ -145,9 +194,29 @@ public class PasswordResetService {
         userRepository.saveAndFlush(user);
 
         log.info("Password successfully reset and sessions revoked for user id={}", user.getId());
-        emailSender.sendPasswordChangedNotification(user.getEmail());
+        String toEmail = user.getEmail();
+        executeAfterCommit(() -> {
+            try {
+                emailSender.sendPasswordChangedNotification(toEmail);
+            } catch (Exception ex) {
+                log.warn("Failed to dispatch password changed notification for {}: {}", toEmail, ex.getMessage());
+            }
+        });
 
         return new MessageResponse("Password has been successfully reset. You may now sign in with your new password.");
+    }
+
+    private void executeAfterCommit(Runnable task) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    emailExecutor.execute(task);
+                }
+            });
+        } else {
+            emailExecutor.execute(task);
+        }
     }
 
     static String sha256(String input) {

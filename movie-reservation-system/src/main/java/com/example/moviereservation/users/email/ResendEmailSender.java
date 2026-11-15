@@ -46,7 +46,17 @@ public class ResendEmailSender implements EmailSender {
 
     @Override
     public boolean isConfigured() {
-        return !apiKey.isBlank();
+        if (apiKey.isBlank()) {
+            return false;
+        }
+        if (mailFrom == null || mailFrom.isBlank()) {
+            return false;
+        }
+        String normalizedFrom = mailFrom.trim().toLowerCase(java.util.Locale.ROOT);
+        if (normalizedFrom.equals("noreply@cinebook.local") || normalizedFrom.endsWith(".local") || !normalizedFrom.contains("@")) {
+            return false;
+        }
+        return true;
     }
 
     @Override
@@ -127,6 +137,7 @@ public class ResendEmailSender implements EmailSender {
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(RESEND_API_URL))
+                    .timeout(Duration.ofSeconds(10))
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json))
@@ -138,9 +149,14 @@ public class ResendEmailSender implements EmailSender {
             } else {
                 log.error("Failed to send email via Resend to {}: status={} body={}",
                         toEmail, response.statusCode(), response.body());
+                throw new IllegalStateException("Resend rejected delivery with status " + response.statusCode() + ": " + response.body());
             }
         } catch (Exception ex) {
             log.error("Exception while sending email via Resend to {}: {}", toEmail, ex.getMessage());
+            if (ex instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new RuntimeException("Resend email dispatch failed", ex);
         }
     }
 }

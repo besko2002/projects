@@ -285,4 +285,22 @@ class GoogleAuthIntegrationTest {
                         .content(objectMapper.writeValueAsString(new GoogleAuthRequest(returningToken))))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    void googleNameOver100CharsTruncatesSafelyWithoutDataIntegrityViolation() throws Exception {
+        String longName = "Very Long Google Patron Name ".repeat(6); // > 150 chars
+        String sub = "google-sub-longname-" + System.nanoTime();
+        String email = "longname-" + System.nanoTime() + "@cinema.test";
+        String token = validToken(sub, email, longName);
+
+        mockMvc.perform(post("/api/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new GoogleAuthRequest(token))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isString());
+
+        User created = userRepository.findByGoogleSub(sub).orElseThrow();
+        assertThat(created.getName()).hasSizeLessThanOrEqualTo(100);
+        assertThat(created.getName()).isEqualTo(longName.substring(0, 100));
+    }
 }

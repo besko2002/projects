@@ -77,11 +77,18 @@ class PasswordResetIntegrationTest {
         CapturedEmailSender testEmailSender() {
             return new CapturedEmailSender();
         }
+
+        @Bean(name = {"applicationTaskExecutor", "testEmailExecutor"})
+        @Primary
+        java.util.concurrent.Executor testEmailExecutor() {
+            return Runnable::run;
+        }
     }
 
     static class CapturedEmailSender implements EmailSender {
         final Map<String, String> resetLinks = new ConcurrentHashMap<>();
         final List<String> notifications = new ArrayList<>();
+        volatile boolean failOnSend = false;
 
         @Override
         public boolean isConfigured() {
@@ -90,6 +97,9 @@ class PasswordResetIntegrationTest {
 
         @Override
         public void sendPasswordReset(String toEmail, String resetLink) {
+            if (failOnSend) {
+                throw new RuntimeException("Simulated email delivery failure");
+            }
             resetLinks.put(toEmail, resetLink);
         }
 
@@ -107,6 +117,7 @@ class PasswordResetIntegrationTest {
     @BeforeEach
     void clearState() {
         emailSender.clear();
+        emailSender.failOnSend = false;
     }
 
     private String extractTokenFromUrl(String url) {
@@ -353,5 +364,60 @@ class PasswordResetIntegrationTest {
         // Exactly one should succeed with 200, the other must fail with 400
         assertThat(successCount.get()).isEqualTo(1);
         assertThat(conflictOrBadRequestCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    void emailDeliveryFailureDoesNotInvalidatePriorValidTokens() throws Exception {
+        String email = "delivery-fail-" + System.nanoTime() + "@cinema.test";
+        userRepository.saveAndFlush(new User("Delivery Target", email, passwordEncoder.encode("InitialP@ss1"), Role.USER));
+
+        // First reset request succeeds and dispatches email
+        mockMvc.perform(post("/api/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ForgotPasswordRequest(email))))
+                .andExpect(status().isOk());
+
+        String firstToken = extractTokenFromUrl(emailSender.resetLinks.get(email));
+        String firstHash = PasswordResetService.sha256(firstToken);
+        assertThat(tokenRepository.findByTokenHash(firstHash).orElseThrow().isUsed()).isFalse();
+
+        // Simulate provider failure on second request
+        emailSender.failOnSend = true;
+
+        mockMvc.perform(post("/api/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ForgotPasswordRequest(email))))
+                .andExpect(status().isOk());
+
+        // Because second email dispatch failed, first valid token must STILL remain usable (used = false)
+        assertThat(tokenRepository.findByTokenHash(firstHash).orElseThrow().isUsed()).isFalse();
+
+        // The user can still successfully reset password with the first token
+        mockMvc.perform(post("/api/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ResetPasswordRequest(firstToken, "NewWorkingPass@123"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void rateLimiterBlocksExcessivePasswordResetRequestsPerEmail() throws Exception {
+        String email = "victim-flood-" + System.nanoTime() + "@cinema.test";
+        userRepository.saveAndFlush(new User("Flood Victim", email, passwordEncoder.encode("Pass@1234"), Role.USER));
+
+        // 3 requests within 15 minutes are permitted
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(post("/api/auth/forgot-password")
+                            .header("X-Forwarded-For", "198.51.100." + (i + 1))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(new ForgotPasswordRequest(email))))
+                    .andExpect(status().isOk());
+        }
+
+        // 4th request for the same email is blocked with 429 Too Many Requests
+        mockMvc.perform(post("/api/auth/forgot-password")
+                        .header("X-Forwarded-For", "198.51.100.99")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ForgotPasswordRequest(email))))
+                .andExpect(status().isTooManyRequests());
     }
 }

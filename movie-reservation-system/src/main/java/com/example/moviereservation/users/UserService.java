@@ -131,11 +131,17 @@ public class UserService {
                 String name = (payload.name() != null && !payload.name().isBlank())
                         ? payload.name().trim()
                         : email.split("@")[0];
+                if (name.length() > 100) {
+                    name = name.substring(0, 100);
+                }
                 user = new User(name, email, null, Role.USER, payload.sub());
                 try {
                     user = userRepository.saveAndFlush(user);
                 } catch (DataIntegrityViolationException ex) {
-                    throw new ConflictException("Email is already registered");
+                    if (userRepository.findByEmail(email).isPresent()) {
+                        throw new ConflictException("Email is already registered");
+                    }
+                    throw ex;
                 }
                 log.info("Registered new user via Google id={} email={}", user.getId(), user.getEmail());
             }

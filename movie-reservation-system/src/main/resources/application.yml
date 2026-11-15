@@ -1,3 +1,6 @@
+server:
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:framework}
+
 spring:
   application:
     name: movie-reservation-system
