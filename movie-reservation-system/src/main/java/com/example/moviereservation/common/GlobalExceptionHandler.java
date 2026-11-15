@@ -60,13 +60,16 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage(), request);
     }
 
-    /**
-     * Method-security failures ({@code @PreAuthorize}) are rethrown so Spring Security's
-     * {@code ExceptionTranslationFilter} answers them with 401 or 403 through the security handlers,
-     * instead of the catch-all below turning them into 500s.
-     */
-    @ExceptionHandler({AccessDeniedException.class, AuthenticationException.class})
-    public void rethrowSecurityException(RuntimeException ex) {
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request) {
+        String message = (ex.getMessage() != null && !ex.getMessage().isBlank())
+                ? ex.getMessage()
+                : "You do not have permission to access this resource";
+        return build(HttpStatus.FORBIDDEN, message, request);
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    public void rethrowAuthenticationException(AuthenticationException ex) {
         throw ex;
     }
 

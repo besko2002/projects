@@ -50,6 +50,12 @@ class GoogleAuthIntegrationTest {
     @Autowired
     private GoogleTokenVerifierImpl googleTokenVerifier;
 
+    @Autowired
+    private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private com.example.moviereservation.security.JwtService jwtService;
+
     @BeforeAll
     static void initKeys() throws Exception {
         KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
@@ -214,5 +220,69 @@ class GoogleAuthIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new GoogleAuthRequest(token))))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void preHijackDefense_whenGoogleLinksAccountWithPassword_passwordAndSessionsAreRevoked() throws Exception {
+        String email = "victim-" + System.nanoTime() + "@cinema.test";
+        String attackerPassword = "AttackerPassword123!";
+
+        // Attacker pre-registers the victim's email address
+        User user = userRepository.saveAndFlush(new User("Victim Name", email, passwordEncoder.encode(attackerPassword), Role.USER));
+        String attackerJwt = jwtService.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getTokenVersion());
+
+        // Attacker JWT works currently
+        mockMvc.perform(get("/api/users/me").header("Authorization", "Bearer " + attackerJwt))
+                .andExpect(status().isOk());
+
+        // Legitimate victim signs in via Google with verified email
+        String victimSub = "google-sub-" + System.nanoTime();
+        String googleToken = validToken(victimSub, email, "Victim Google Name");
+
+        mockMvc.perform(post("/api/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new GoogleAuthRequest(googleToken))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isString());
+
+        // 1. Password has been cleared in DB
+        User updated = userRepository.findById(user.getId()).orElseThrow();
+        assertThat(updated.getPasswordHash()).isNull();
+        assertThat(updated.getGoogleSub()).isEqualTo(victimSub);
+
+        // 2. Attacker's existing JWT is now rejected (revoked by tokenVersion increment)
+        mockMvc.perform(get("/api/users/me").header("Authorization", "Bearer " + attackerJwt))
+                .andExpect(status().isUnauthorized());
+
+        // 3. Attacker cannot sign in using the old password anymore
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest(email, attackerPassword))))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void adminAccountsCannotSignInWithGoogle() throws Exception {
+        String adminEmail = "admin-" + System.nanoTime() + "@cinema.test";
+        User admin = userRepository.saveAndFlush(new User("Admin User", adminEmail, passwordEncoder.encode("AdminPass123!"), Role.ADMIN));
+
+        String sub = "google-sub-admin-" + System.nanoTime();
+        String token = validToken(sub, adminEmail, "Admin Google");
+
+        // Attempting to link or sign in an ADMIN account via Google must be rejected with 403
+        mockMvc.perform(post("/api/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new GoogleAuthRequest(token))))
+                .andExpect(status().isForbidden());
+
+        // Also test an existing user with googleSub who was later granted ADMIN
+        admin.setGoogleSub("existing-admin-sub");
+        userRepository.saveAndFlush(admin);
+
+        String returningToken = validToken("existing-admin-sub", adminEmail, "Admin Google");
+        mockMvc.perform(post("/api/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new GoogleAuthRequest(returningToken))))
+                .andExpect(status().isForbidden());
     }
 }

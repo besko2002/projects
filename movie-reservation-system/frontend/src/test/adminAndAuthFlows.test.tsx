@@ -193,6 +193,37 @@ describe('Password Reset Pages', () => {
 
     expect(await screen.findByText(/Password Reset Complete/i)).toBeInTheDocument();
   });
+
+  it('ResetPasswordPage reads token from URL fragment (#token=)', async () => {
+    vi.mocked(authApi.resetPassword).mockResolvedValue({
+      message: 'Your password has been successfully reset.',
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/reset-password#token=fragment-secret-token']}>
+        <Routes>
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const passInput = screen.getByLabelText(/^New Password/i);
+    const confirmInput = screen.getByLabelText(/Confirm New Password/i);
+    const submitBtn = screen.getByRole('button', { name: /Update password/i });
+
+    fireEvent.change(passInput, { target: { value: 'Secret123!' } });
+    fireEvent.change(confirmInput, { target: { value: 'Secret123!' } });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(authApi.resetPassword).toHaveBeenCalledWith({
+        token: 'fragment-secret-token',
+        newPassword: 'Secret123!',
+      });
+    });
+
+    expect(await screen.findByText(/Password Reset Complete/i)).toBeInTheDocument();
+  });
 });
 
 describe('SignInPage Enhancements', () => {

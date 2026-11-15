@@ -1,12 +1,24 @@
-import React, { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import React, { useMemo, useState } from 'react';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { TopBar } from '../components/TopBar';
 import * as authApi from '../api/authApi';
 import { ApiException } from '../api/client';
 
 export function ResetPasswordPage(): React.JSX.Element {
+  const location = useLocation();
   const [searchParams] = useSearchParams();
-  const token = searchParams.get('token');
+
+  // Support reading token from URL fragment (#token=...) to avoid leakage in server/proxy logs
+  // and maintain backward compatibility with query parameters (?token=...)
+  const token = useMemo(() => {
+    if (location.hash) {
+      const match = location.hash.match(/[#&]token=([^&]+)/);
+      if (match) {
+        return decodeURIComponent(match[1]);
+      }
+    }
+    return searchParams.get('token');
+  }, [location.hash, searchParams]);
   const navigate = useNavigate();
 
   const [newPassword, setNewPassword] = useState('');

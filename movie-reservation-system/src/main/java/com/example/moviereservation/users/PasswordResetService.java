@@ -92,7 +92,7 @@ public class PasswordResetService {
                 tokenRepository.saveAndFlush(token);
 
                 String cleanBase = frontendBaseUrl.replaceAll("/+$", "");
-                String resetLink = cleanBase + "/reset-password?token=" + rawToken;
+                String resetLink = cleanBase + "/reset-password#token=" + rawToken;
 
                 // Send email; raw token is NEVER logged
                 emailSender.sendPasswordReset(user.getEmail(), resetLink);
@@ -123,7 +123,7 @@ public class PasswordResetService {
         }
 
         String tokenHash = sha256(rawToken.trim());
-        Optional<PasswordResetToken> tokenOpt = tokenRepository.findByTokenHash(tokenHash);
+        Optional<PasswordResetToken> tokenOpt = tokenRepository.findByTokenHashForUpdate(tokenHash);
 
         if (tokenOpt.isEmpty()) {
             throw new BadRequestException("Invalid or expired password reset token");

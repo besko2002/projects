@@ -26,6 +26,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -106,11 +112,22 @@ class PasswordResetIntegrationTest {
     private String extractTokenFromUrl(String url) {
         try {
             URI uri = URI.create(url);
+            String fragment = uri.getFragment();
+            if (fragment != null && !fragment.isBlank()) {
+                for (String param : fragment.split("&")) {
+                    String[] pair = param.split("=");
+                    if ("token".equals(pair[0])) {
+                        return URLDecoder.decode(pair[1], StandardCharsets.UTF_8);
+                    }
+                }
+            }
             String query = uri.getQuery();
-            for (String param : query.split("&")) {
-                String[] pair = param.split("=");
-                if ("token".equals(pair[0])) {
-                    return URLDecoder.decode(pair[1], StandardCharsets.UTF_8);
+            if (query != null && !query.isBlank()) {
+                for (String param : query.split("&")) {
+                    String[] pair = param.split("=");
+                    if ("token".equals(pair[0])) {
+                        return URLDecoder.decode(pair[1], StandardCharsets.UTF_8);
+                    }
                 }
             }
         } catch (Exception ex) {
@@ -132,7 +149,7 @@ class PasswordResetIntegrationTest {
 
         assertThat(emailSender.resetLinks).containsKey(email);
         String resetLink = emailSender.resetLinks.get(email);
-        assertThat(resetLink).startsWith("http://127.0.0.1:5177/reset-password?token=");
+        assertThat(resetLink).startsWith("http://127.0.0.1:5177/reset-password#token=");
 
         String rawToken = extractTokenFromUrl(resetLink);
         String expectedHash = PasswordResetService.sha256(rawToken);
@@ -280,5 +297,61 @@ class PasswordResetIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new ResetPasswordRequest("some-token", "short"))))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void concurrentResetsWithSameTokenSerializeAndOnlyOneSucceeds() throws Exception {
+        String email = "concurrent-reset-" + System.nanoTime() + "@cinema.test";
+        userRepository.saveAndFlush(new User("Concurrent User", email, passwordEncoder.encode("Pass@1234"), Role.USER));
+
+        mockMvc.perform(post("/api/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ForgotPasswordRequest(email))))
+                .andExpect(status().isOk());
+
+        String rawToken = extractTokenFromUrl(emailSender.resetLinks.get(email));
+
+        int threads = 2;
+        ExecutorService executor = Executors.newFixedThreadPool(threads);
+        CountDownLatch readyLatch = new CountDownLatch(threads);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        AtomicInteger successCount = new AtomicInteger();
+        AtomicInteger conflictOrBadRequestCount = new AtomicInteger();
+
+        List<Future<?>> futures = new ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            final int index = i;
+            futures.add(executor.submit(() -> {
+                readyLatch.countDown();
+                try {
+                    startLatch.await();
+                    var result = mockMvc.perform(post("/api/auth/reset-password")
+                                    .contentType(MediaType.APPLICATION_JSON)
+                                    .content(objectMapper.writeValueAsString(new ResetPasswordRequest(rawToken, "NewPass@" + index + "123"))))
+                            .andReturn();
+
+                    int statusCode = result.getResponse().getStatus();
+                    if (statusCode == 200) {
+                        successCount.incrementAndGet();
+                    } else if (statusCode == 400) {
+                        conflictOrBadRequestCount.incrementAndGet();
+                    }
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }));
+        }
+
+        assertThat(readyLatch.await(5, TimeUnit.SECONDS)).isTrue();
+        startLatch.countDown();
+
+        for (Future<?> f : futures) {
+            f.get(10, TimeUnit.SECONDS);
+        }
+        executor.shutdown();
+
+        // Exactly one should succeed with 200, the other must fail with 400
+        assertThat(successCount.get()).isEqualTo(1);
+        assertThat(conflictOrBadRequestCount.get()).isEqualTo(1);
     }
 }

@@ -8,6 +8,7 @@ import com.example.moviereservation.users.google.GoogleTokenPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -101,14 +102,26 @@ public class UserService {
         User user;
         if (userBySub.isPresent()) {
             user = userBySub.get();
+            if (user.getRole() == Role.ADMIN) {
+                throw new AccessDeniedException("Staff administrator accounts must sign in with email and password");
+            }
         } else {
             // 2. Check if user with this verified email already exists
             Optional<User> userByEmail = userRepository.findByEmail(email);
             if (userByEmail.isPresent()) {
                 user = userByEmail.get();
+                if (user.getRole() == Role.ADMIN) {
+                    throw new AccessDeniedException("Staff administrator accounts must sign in with email and password");
+                }
                 // Ensure the account is not already linked to a different Google subject ID
                 if (user.getGoogleSub() != null && !user.getGoogleSub().equals(payload.sub())) {
                     throw new ConflictException("An account with this email is already linked to a different Google account");
+                }
+                // Pre-hijack defense (CB-1): if the account had a password, clear it and revoke existing sessions
+                if (user.getPasswordHash() != null) {
+                    user.setPasswordHash(null);
+                    user.revokeTokens();
+                    log.info("Cleared password and revoked sessions on Google link for user id={}", user.getId());
                 }
                 user.setGoogleSub(payload.sub());
                 user = userRepository.saveAndFlush(user);
