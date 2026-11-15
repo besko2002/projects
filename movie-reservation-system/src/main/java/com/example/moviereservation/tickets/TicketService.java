@@ -80,7 +80,7 @@ import java.util.Optional;
  * A redelivered event therefore finds the ticket already in its target state and does nothing,
  * which is exactly what Stripe's at-least-once delivery needs. No separate "processed events"
  * table is required because each event type has one target state and that state is idempotent.
- * Refunds additionally use a stable per-ticket idempotency key, so a redelivery after a database
+ * Refunds additionally use a stable per-payment idempotency key, so a redelivery after a database
  * failure asks Stripe for the same refund instead of creating a second one.
  *
  * <h2>Module boundaries</h2>
@@ -333,7 +333,8 @@ public class TicketService {
                 }
                 BigDecimal remaining = ticket.getTotalPrice().subtract(refundedSoFar(ticketId));
                 RefundDto refund = remaining.signum() > 0
-                        ? paymentGateway.refund(ticket.getStripePaymentIntentId(), remaining, refundKey(ticketId))
+                        ? paymentGateway.refund(ticket.getStripePaymentIntentId(), remaining,
+                                refundKey(ticket.getStripePaymentIntentId(), remaining))
                         : null;
                 recordRefund(ticket, remaining, now);
                 ticket.markRefunded(now);
@@ -526,11 +527,11 @@ public class TicketService {
                         ? fromMinorUnits(event.amountTotal(), event.currency())
                         : ticket.getTotalPrice();
 
-        // The key is stable per ticket: if Stripe succeeded but this transaction rolled back, the
-        // redelivered event asks for the same refund and Stripe returns the original one instead of
-        // moving the money a second time.
+        // The key is stable per payment and amount: if Stripe succeeded but this transaction rolled
+        // back, the redelivered event asks for the same refund and Stripe returns the original one
+        // instead of moving the money a second time.
         RefundDto refund = paymentGateway.refund(paymentIntentId, refundAmount,
-                refundKey(ticket.getId()));
+                refundKey(paymentIntentId, refundAmount));
         ticket.setStripePaymentIntentId(paymentIntentId);
         if (ticket.getStripeSessionId() == null && event.sessionId() != null) {
             ticket.setStripeSessionId(event.sessionId());
@@ -698,9 +699,17 @@ public class TicketService {
         return (userId << 32) ^ scheduleId;
     }
 
-    /** Stable idempotency key for every refund attempt of one ticket. */
-    private static String refundKey(Long ticketId) {
-        return "ticket-%d-refund".formatted(ticketId);
+    /**
+     * Idempotency key for one refund request, stable across retries of the same refund.
+     *
+     * <p>It is derived from the Stripe payment intent (globally unique within the Stripe account)
+     * and the amount, never from the local ticket id. Ticket ids restart in every database, so a
+     * ticket-based key collides with an earlier, different refund whenever a database is reset or
+     * restored, or several environments share one Stripe account; Stripe then refuses the refund.
+     * Including the amount keeps two genuinely different refunds of one payment apart.
+     */
+    static String refundKey(String paymentIntentId, BigDecimal amount) {
+        return "refund-%s-%s".formatted(paymentIntentId, amount.stripTrailingZeros().toPlainString());
     }
 
     private void expireCheckoutSessionQuietly(Ticket ticket) {

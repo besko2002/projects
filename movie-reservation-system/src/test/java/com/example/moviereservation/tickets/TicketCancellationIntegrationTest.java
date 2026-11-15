@@ -55,7 +55,7 @@ class TicketCancellationIntegrationTest extends AbstractTicketIntegrationTest {
         assertThat(ticketStatus(ticketId)).isEqualTo("REFUNDED");
         FakePaymentGateway.RecordedRefund refund = paymentGateway.refundOf(paymentIntentId).orElseThrow();
         assertThat(refund.amount()).isEqualByComparingTo("25.00");
-        assertThat(refund.idempotencyKey()).isEqualTo("ticket-" + ticketId + "-refund");
+        assertThat(refund.idempotencyKey()).isEqualTo(TicketService.refundKey(paymentIntentId, refund.amount()));
         assertThat(paymentGateway.refunds()).hasSize(1);
         assertThat(reservationStatusesOfTicket(ticketId)).containsExactly("RELEASED");
     }
@@ -76,7 +76,8 @@ class TicketCancellationIntegrationTest extends AbstractTicketIntegrationTest {
         FakePaymentGateway.RecordedRefund refund = paymentGateway.refundOf(paymentIntentId).orElseThrow();
         assertThat(refund.amount()).isEqualByComparingTo("35.00");
         // A stable key makes a retried refund after a failed commit return the same Stripe refund.
-        assertThat(refund.idempotencyKey()).isEqualTo("ticket-" + ticketId + "-refund");
+        // It names the payment, not the ticket id, so it cannot collide across databases.
+        assertThat(refund.idempotencyKey()).isEqualTo("refund-" + paymentIntentId + "-35");
         assertThat(reservationStatusesOfTicket(ticketId)).containsExactly("RELEASED", "RELEASED");
         assertThat(fixtures.seatStatus(show.scheduleId(), show.seat(0))).isEqualTo("AVAILABLE");
     }
@@ -194,7 +195,7 @@ class TicketCancellationIntegrationTest extends AbstractTicketIntegrationTest {
         assertThat(reservationStatusesOfTicket(ticketId)).containsExactly("RELEASED");
         FakePaymentGateway.RecordedRefund refund = paymentGateway.refundOf(paymentIntentId).orElseThrow();
         assertThat(refund.amount()).isEqualByComparingTo("25.00");
-        assertThat(refund.idempotencyKey()).isEqualTo("ticket-" + ticketId + "-refund");
+        assertThat(refund.idempotencyKey()).isEqualTo(TicketService.refundKey(paymentIntentId, refund.amount()));
     }
 
     private org.springframework.test.web.servlet.ResultActions cancel(String token, long ticketId) throws Exception {
