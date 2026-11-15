@@ -137,6 +137,15 @@ export interface PatchEmployeeRequest {
   salary?: number | null;
 }
 
+export interface ResetEmployeePasswordRequest {
+  reason: string;
+}
+
+export interface ResetEmployeePasswordResponse {
+  employeeId: string;
+  temporaryPassword: string;
+}
+
 export interface CreatedEmployeeResponse {
   employee: EmployeeRecord;
   temporaryPassword: string;
@@ -259,6 +268,12 @@ export interface HolidayRequestBody {
 }
 
 // ----------------------------------------------------------------- attendance
+
+export interface AttendanceSessionRequest {
+  checkIn: string;
+  checkOut: string | null;
+  reason: string;
+}
 
 export interface SessionResponse {
   id: string;

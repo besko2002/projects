@@ -179,6 +179,29 @@ class AttendanceCorrectionIntegrationTest extends AbstractAttendanceIntegrationT
     }
 
     @Test
+    void correctionMustAlsoRespectTheHireDate() throws Exception {
+        NewEmployee joiner = createEmployee(adminToken, "Jana Joiner", Role.EMPLOYEE, null, null,
+                "5000.00", "2025-03-10");
+        UUID id = addSessionOk(hrToken, joiner.id(), march(11), "09:00", "17:00");
+        correctSession(hrToken, id, at(march(4), "09:00"), at(march(4), "17:00"), "before hire")
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void addAndCorrectionRespectTheInclusiveTerminationDate() throws Exception {
+        UUID id = addSessionOk(hrToken, staff.id(), march(4), "09:00", "17:00");
+        jdbc.update("update employees set status = 'TERMINATED', terminated_at = ? where id = ?",
+                march(5), staff.id());
+        addSessionOk(hrToken, staff.id(), march(5), "09:00", "17:00");
+        addSession(hrToken, staff.id(), at(march(6), "09:00"), at(march(6), "17:00"), "after termination")
+                .andExpect(status().isBadRequest());
+        correctSession(hrToken, id, at(march(6), "09:00"), at(march(6), "17:00"), "after termination")
+                .andExpect(status().isBadRequest());
+        correctSession(hrToken, id, at(march(4), "08:30"), at(march(4), "17:00"), "historic repair")
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void anUnknownEmployeeOrSessionIsANotFound() throws Exception {
         addSession(hrToken, UUID.randomUUID(), at(march(4), "09:00"), at(march(4), "17:00"), "ghost")
                 .andExpect(status().isNotFound());
@@ -231,7 +254,7 @@ class AttendanceCorrectionIntegrationTest extends AbstractAttendanceIntegrationT
     }
 
     @Test
-    void anOverlapWithAnOpenSessionIsDetectedOnItsCheckInInstant() throws Exception {
+    void anOpenSessionReservesItsRemainingWorkDay() throws Exception {
         LocalDate yesterday = LocalDate.now(ZONE).minusDays(1);
         addSession(hrToken, staff.id(), at(yesterday, "09:00"), null, "open")
                 .andExpect(status().isCreated());
@@ -239,6 +262,6 @@ class AttendanceCorrectionIntegrationTest extends AbstractAttendanceIntegrationT
         addSession(hrToken, staff.id(), at(yesterday, "08:00"), at(yesterday, "10:00"), "straddles it")
                 .andExpect(status().isConflict());
         addSession(hrToken, staff.id(), at(yesterday, "10:00"), at(yesterday, "12:00"), "after it")
-                .andExpect(status().isCreated());
+                .andExpect(status().isConflict());
     }
 }

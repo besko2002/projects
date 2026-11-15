@@ -58,7 +58,11 @@ export function ApprovalsPage({
         toast.success(`Rejected ${decision.request.employeeName}'s leave.`);
       }
       setDecision(null);
-      pending.reload();
+      if (page > 0 && pending.data?.content.length === 1) {
+        setPage(page - 1);
+      } else {
+        pending.reload();
+      }
     } catch (cause) {
       setError(errorMessage(cause));
       setDecision(null);
@@ -85,7 +89,16 @@ export function ApprovalsPage({
         )}
 
         {pending.data !== null && pending.data.content.length === 0 && (
-          <EmptyState title="Nothing is waiting for you." hint="Every request has been decided." />
+          pending.data.totalElements === 0 && page === 0 ? (
+            <EmptyState title="Nothing is waiting for you." hint="Every request has been decided." />
+          ) : (
+            <div>
+              <EmptyState title="No requests on this page." hint="The queue changed. Return to the first page to see what is still waiting." />
+              <button type="button" className="button" disabled={pending.loading} onClick={() => setPage(0)}>
+                First page
+              </button>
+            </div>
+          )
         )}
 
         {pending.data !== null && pending.data.content.length > 0 && (
@@ -121,6 +134,7 @@ export function ApprovalsPage({
                         onClick={() => {
                           setDecision({ request, kind: 'approve' });
                         }}
+                        disabled={busy || pending.loading}
                         aria-label={`Approve ${request.employeeName}'s leave request`}
                       >
                         Approve
@@ -131,6 +145,7 @@ export function ApprovalsPage({
                         onClick={() => {
                           setDecision({ request, kind: 'reject' });
                         }}
+                        disabled={busy || pending.loading}
                         aria-label={`Reject ${request.employeeName}'s leave request`}
                       >
                         Reject
@@ -140,14 +155,16 @@ export function ApprovalsPage({
                 ))}
               </tbody>
             </table>
-            <Pagination
-              page={pending.data.page}
-              totalPages={pending.data.totalPages}
-              totalElements={pending.data.totalElements}
-              onChange={setPage}
-              busy={pending.loading}
-            />
           </>
+        )}
+        {pending.data !== null && (pending.data.totalElements > 0 || page > 0) && (
+          <Pagination
+            page={pending.data.page}
+            totalPages={pending.data.totalPages}
+            totalElements={pending.data.totalElements}
+            onChange={setPage}
+            busy={pending.loading}
+          />
         )}
       </Card>
 

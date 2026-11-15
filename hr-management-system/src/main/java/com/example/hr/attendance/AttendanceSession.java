@@ -123,7 +123,7 @@ public class AttendanceSession {
         return new SessionWindow(id,
                 checkIn.atZone(zone).toLocalDateTime(),
                 checkOut == null ? null : checkOut.atZone(zone).toLocalDateTime(),
-                source);
+                source, checkIn, checkOut);
     }
 
     @PreUpdate

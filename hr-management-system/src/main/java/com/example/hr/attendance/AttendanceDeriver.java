@@ -86,7 +86,8 @@ public class AttendanceDeriver {
         var holidays = calendar.holidaysBetween(from, last);
         var coverage = calendar.leaveCoverage(ids, from, last);
         Map<UUID, Map<LocalDate, List<SessionWindow>>> byEmployee = loadSessions(ids, from, last);
-        LocalDateTime now = now();
+        java.time.Instant nowInstant = instant();
+        LocalDateTime now = LocalDateTime.ofInstant(nowInstant, rules.zone());
 
         for (Employee employee : employees) {
             LocalDate start = max(from, employee.getHireDate());
@@ -102,7 +103,7 @@ public class AttendanceDeriver {
                         calendar.kindOf(day, holidays),
                         leave.getOrDefault(day, LeaveCoverage.NONE),
                         windows.getOrDefault(day, List.of()),
-                        now)));
+                        now, nowInstant)));
             }
             result.put(employee.getId(), days);
         }

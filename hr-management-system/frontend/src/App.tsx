@@ -14,6 +14,7 @@ import { CreateEmployeePage } from './pages/CreateEmployeePage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DepartmentsPage } from './pages/DepartmentsPage';
 import { EmployeeDetailPage } from './pages/EmployeeDetailPage';
+import { EmployeeAttendancePage } from './pages/EmployeeAttendancePage';
 import { EmployeesPage } from './pages/EmployeesPage';
 import { ForbiddenPage, NotFoundPage } from './pages/ForbiddenPage';
 import { HolidaysPage } from './pages/HolidaysPage';
@@ -66,6 +67,7 @@ export function App(): JSX.Element {
               <Route path="employees" element={<EmployeesPage />} />
               <Route path="employees/new" element={<CreateEmployeePage />} />
               <Route path="employees/:id" element={<EmployeeDetailPage />} />
+              <Route path="employees/:id/attendance" element={<EmployeeAttendancePage />} />
               <Route path="departments" element={<DepartmentsPage />} />
               <Route path="holidays" element={<HolidaysPage />} />
               <Route path="leave-overview" element={<LeaveOverviewPage />} />

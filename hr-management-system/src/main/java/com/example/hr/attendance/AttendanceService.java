@@ -92,11 +92,13 @@ public class AttendanceService {
     public SessionResponse checkIn() {
         Employee me = requireActive();
         Instant now = deriver.instant();
-        LocalDate workDate = deriver.today();
+        LocalDate workDate = now.atZone(rules.zone()).toLocalDate();
+        requireEmploymentDate(me, now);
 
         if (sessions.findOpenOn(me.getId(), workDate).isPresent()) {
             throw new ConflictException("You already have an open attendance session today; check out first");
         }
+        requireNoOverlap(me.getId(), now, null, AttendanceSessionRepository.NOTHING_EXCLUDED);
         try {
             // saveAndFlush, so the database guard (one open session per employee and work day)
             // is checked here and not at commit time: a concurrent check-in that slipped past
@@ -134,17 +136,26 @@ public class AttendanceService {
     public SessionResponse checkOut() {
         Employee me = requireActive();
         Instant now = deriver.instant();
-        AttendanceSession open = sessions.findOpenOn(me.getId(), deriver.today())
+        AttendanceSession open = sessions.findOpenOn(me.getId(), now.atZone(rules.zone()).toLocalDate())
                 .orElseThrow(() -> new ConflictException(
                         "You have no open attendance session today; check in first"));
         if (!now.isAfter(open.getCheckIn())) {
             throw new ConflictException("The check-out time would not be after the check-in time");
         }
+        requireEmploymentDate(me, open.getCheckIn());
+        requireNoOverlap(me.getId(), open.getCheckIn(), now, open.getId());
         open.close(now);
         return toSession(sessions.save(open), rules.zone());
     }
 
     // ------------------------------------------------------------------ reading
+
+    @Transactional(readOnly = true)
+    public AttendanceRangeResponse myToday() {
+        Employee me = currentEmployee.require();
+        LocalDate today = deriver.today();
+        return range(me, today, today);
+    }
 
     @Transactional(readOnly = true)
     public AttendanceRangeResponse myDays(LocalDate from, LocalDate to) {
@@ -222,11 +233,15 @@ public class AttendanceService {
     public SessionResponse correct(UUID sessionId, CorrectSessionBody body) {
         Employee actor = currentEmployee.require();
         policy.requireHrOrAdmin(actor, "correct attendance sessions");
+        UUID employeeId = sessions.employeeIdOf(sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("No attendance session with id " + sessionId));
+        policy.requireNotOwnAttendance(actor, employeeId);
+        Employee target = lockEmployee(employeeId);
         AttendanceSession session = sessions.findById(sessionId)
                 .orElseThrow(() -> new ResourceNotFoundException("No attendance session with id " + sessionId));
-        policy.requireNotOwnAttendance(actor, session.employeeId());
 
         validate(body.checkIn(), body.checkOut());
+        requireEmploymentDate(target, body.checkIn());
         requireNoOverlap(session.employeeId(), body.checkIn(), body.checkOut(), session.getId());
         session.correctTo(body.checkIn(), body.checkOut(), rules.zone(), actor, body.reason().trim());
         return toSession(sessions.save(session), rules.zone());
@@ -237,14 +252,10 @@ public class AttendanceService {
         Employee actor = currentEmployee.require();
         policy.requireHrOrAdmin(actor, "add attendance sessions");
         policy.requireNotOwnAttendance(actor, employeeId);
-        Employee target = require(employeeId);
+        Employee target = lockEmployee(employeeId);
 
         validate(body.checkIn(), body.checkOut());
-        LocalDate workDate = body.checkIn().atZone(rules.zone()).toLocalDate();
-        if (workDate.isBefore(target.getHireDate())) {
-            throw new BadRequestException("The session starts before the employee's hire date ("
-                    + target.getHireDate() + ")");
-        }
+        requireEmploymentDate(target, body.checkIn());
         requireNoOverlap(employeeId, body.checkIn(), body.checkOut(),
                 AttendanceSessionRepository.NOTHING_EXCLUDED);
         return toSession(sessions.save(AttendanceSession.correction(target, body.checkIn(), body.checkOut(),
@@ -280,12 +291,37 @@ public class AttendanceService {
     }
 
     private void requireNoOverlap(UUID employeeId, Instant checkIn, Instant checkOut, UUID excludeId) {
-        // An open session is a point in time for overlap purposes: its end is unknown.
-        Instant end = checkOut == null ? checkIn.plusMillis(1) : checkOut;
-        if (sessions.overlaps(employeeId, checkIn, end, excludeId)) {
+        // Reserve the remainder of an open session's work day. Older abandoned opens must
+        // still allow a new day's check-in, but HR cannot insert hours it could later duplicate.
+        Instant end = intervalEnd(checkIn, checkOut);
+        if (sessions.overlapCandidates(employeeId, checkIn, end, excludeId).stream()
+                .anyMatch(other -> intervalEnd(other.getCheckIn(), other.getCheckOut()).isAfter(checkIn))) {
             throw new ConflictException(
                     "That interval overlaps another attendance session of the same employee");
         }
+    }
+
+    private Instant intervalEnd(Instant checkIn, Instant checkOut) {
+        return checkOut != null ? checkOut
+                : checkIn.atZone(rules.zone()).toLocalDate().plusDays(1).atStartOfDay(rules.zone()).toInstant();
+    }
+
+    private void requireEmploymentDate(Employee employee, Instant checkIn) {
+        LocalDate workDate = checkIn.atZone(rules.zone()).toLocalDate();
+        if (workDate.isBefore(employee.getHireDate())) {
+            throw new BadRequestException("The session starts before the employee's hire date ("
+                    + employee.getHireDate() + ")");
+        }
+        // As in derivation/payroll, the termination date itself remains an employment day.
+        if (employee.getTerminatedAt() != null && workDate.isAfter(employee.getTerminatedAt())) {
+            throw new BadRequestException("The session starts after the employee's termination date ("
+                    + employee.getTerminatedAt() + ")");
+        }
+    }
+
+    private Employee lockEmployee(UUID id) {
+        return sessions.lockEmployee(id)
+                .orElseThrow(() -> new ResourceNotFoundException("No employee with id " + id));
     }
 
     private AttendanceRangeResponse range(Employee employee, LocalDate from, LocalDate to) {
@@ -359,7 +395,7 @@ public class AttendanceService {
     }
 
     private Employee requireActive() {
-        Employee me = currentEmployee.require();
+        Employee me = lockEmployee(currentEmployee.require().getId());
         if (!me.isActive()) {
             throw new ConflictException("A terminated employee cannot record attendance");
         }

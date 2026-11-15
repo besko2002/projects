@@ -145,7 +145,10 @@ export async function adminToken(
   email: string,
   password?: string,
 ): Promise<string> {
-  const adminPwd = password && password.length > 0 ? password : await getAdminPassword();
+  // A previous worker may already have rotated the bootstrap password. Resolve it again
+  // rather than trusting an initial credential captured before that worker completed.
+  const isBootstrapAdmin = email.toLowerCase() === (process.env.E2E_ADMIN_EMAIL ?? 'admin@hr.local').toLowerCase();
+  const adminPwd = isBootstrapAdmin ? await getAdminPassword() : password || await getAdminPassword();
   const response = await request.post('/api/auth/login', {
     data: { email, password: adminPwd },
   });

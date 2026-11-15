@@ -1,5 +1,6 @@
 package com.example.hr.attendance;
 
+import com.example.hr.PostgresTestDatabase;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.AfterEach;
@@ -7,9 +8,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -30,13 +28,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <p>The schema is built with Flyway directly (target V7) instead of through Spring, because the
  * point of the test is what happens when the migration meets existing duplicates.
  */
-@Testcontainers
 class OpenSessionGuardMigrationTest {
 
-    @Container
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
-            .withDatabaseName("hr").withUsername("hr")
-            .withPassword("test-only-hr-db-password");
+    static final PostgresTestDatabase POSTGRES = new PostgresTestDatabase();
+
+    static {
+        POSTGRES.start();
+    }
 
     private JdbcTemplate jdbc;
 

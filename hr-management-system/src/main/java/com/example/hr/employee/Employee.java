@@ -200,6 +200,12 @@ public class Employee {
         this.tokenVersion++;
     }
 
+    /** HR recovery revokes existing tokens and requires replacement of the temporary password. */
+    public void resetPassword(String passwordHash) {
+        setPassword(passwordHash);
+        this.mustChangePassword = true;
+    }
+
     /** The token version carried in the tokens of this employee; bumped on every password change. */
     public int getTokenVersion() {
         return tokenVersion;

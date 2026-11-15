@@ -10,6 +10,9 @@ test('checks in and out again', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: /today/i })).toBeVisible();
 
+  // Both actions are intentionally disabled until the server business day is loaded.
+  await expect(page.getByText(/You are currently checked in\.|No session is open right now\./)).toBeVisible();
+
   const checkIn = page.getByRole('button', { name: 'Check in' });
   const checkOut = page.getByRole('button', { name: 'Check out' });
 

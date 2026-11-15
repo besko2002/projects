@@ -19,6 +19,47 @@ describe('api client', () => {
     expect(readToken()).toBe('new-jwt');
   });
 
+  it('keeps a wrong-current-password 400 recoverable through the real client', async () => {
+    writeToken('valid-jwt');
+    const unauthorized = vi.fn();
+    setUnauthorizedHandler(unauthorized);
+    installFetchMock({
+      'POST /api/auth/change-password': { status: 400, body: { message: 'The current password is incorrect' } },
+    });
+    await expect(api.changePassword({ currentPassword: 'wrong', newPassword: 'New@12345' }))
+      .rejects.toMatchObject({ status: 400, message: 'The current password is incorrect' });
+    expect(unauthorized).not.toHaveBeenCalled();
+    expect(readToken()).toBe('valid-jwt');
+  });
+
+  it('still invalidates an expired session on the change-password endpoint', async () => {
+    const unauthorized = vi.fn();
+    setUnauthorizedHandler(unauthorized);
+    installFetchMock({ 'POST /api/auth/change-password': { status: 401, body: { message: 'Token expired' } } });
+    await expect(api.changePassword({ currentPassword: 'Old@12345', newPassword: 'New@12345' }))
+      .rejects.toMatchObject({ status: 401 });
+    expect(unauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends reset and attendance contracts without retaining a temporary password', async () => {
+    const body = { checkIn: '2026-11-15T08:00:00Z', checkOut: null, reason: 'Verified' };
+    const mock = installFetchMock({
+      'POST /api/employees/emp-1/reset-password': { body: { employeeId: 'emp-1', temporaryPassword: 'Once@12345' } },
+      'GET /api/attendance/today': { body: { days: [] } },
+      'POST /api/attendance/sessions/session-1/correct': { body: { id: 'session-1' } },
+      'POST /api/attendance/employees/emp-1/sessions': { body: { id: 'session-2' } },
+    });
+    await expect(api.resetEmployeePassword('emp-1', { reason: 'Verified' })).resolves.toEqual({ employeeId: 'emp-1', temporaryPassword: 'Once@12345' });
+    await api.myAttendanceToday();
+    await api.correctAttendanceSession('session-1', body);
+    await api.addAttendanceSession('emp-1', body);
+    expect(mock.callsTo('POST /api/employees/emp-1/reset-password')[0].body).toEqual({ reason: 'Verified' });
+    expect(mock.callsTo('POST /api/attendance/sessions/session-1/correct')[0].body).toEqual(body);
+    expect(mock.callsTo('POST /api/attendance/employees/emp-1/sessions')[0].body).toEqual(body);
+    expect(JSON.stringify(localStorage)).not.toContain('Once@12345');
+    expect(JSON.stringify(sessionStorage)).not.toContain('Once@12345');
+  });
+
   it('attaches the bearer token to an authenticated call', async () => {
     writeToken('jwt-123');
     const mock = installFetchMock({ 'GET /api/employees/me': { body: { id: 'emp-1' } } });

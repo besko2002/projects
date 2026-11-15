@@ -23,6 +23,26 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
 
     private static final String GENERIC = "Invalid email or password";
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.security.oauth2.jwt.JwtEncoder tokenEncoder;
+
+    @Test
+    void aRealExpiredSignedTokenStillReturns401ForPasswordChange() throws Exception {
+        String admin = adminToken();
+        NewEmployee staff = createEmployee(admin, "Expired Change", Role.EMPLOYEE, null);
+        var claims = org.springframework.security.oauth2.jwt.JwtClaimsSet.builder()
+                .issuer("hr-management-system").subject(staff.id().toString())
+                .issuedAt(Instant.now().minusSeconds(7200)).expiresAt(Instant.now().minusSeconds(3600))
+                .claim("role", "EMPLOYEE").claim("ver", 0).build();
+        var signed = tokenEncoder.encode(org.springframework.security.oauth2.jwt.JwtEncoderParameters.from(
+                org.springframework.security.oauth2.jwt.JwsHeader.with(
+                        org.springframework.security.oauth2.jose.jws.MacAlgorithm.HS256).build(), claims));
+        mvc.perform(post("/api/auth/change-password").header("Authorization", bearer(signed.getTokenValue()))
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(
+                        Map.of("currentPassword", staff.password(), "newPassword", "Recovered@2026"))))
+                .andExpect(status().isUnauthorized());
+    }
+
     @Test
     void theBootstrapAdminCanLogIn() throws Exception {
         mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
@@ -366,8 +386,10 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsString(
                                 Map.of("currentPassword", "definitely-wrong", "newPassword", "Another@2024"))))
-                .andExpect(status().isUnauthorized())
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("The current password is incorrect"));
+        // A recoverable input error does not revoke the session.
+        getAs(token, "/api/employees/me").andExpect(status().isOk());
     }
 
     @Test

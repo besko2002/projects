@@ -1,6 +1,8 @@
 package com.example.hr.attendance;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.util.Comparator;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -55,15 +57,17 @@ public final class DailyAttendanceCalculator {
     }
 
     public DailyAttendance calculate(DailyAttendanceInput input) {
-        List<SessionWindow> sessions = input.sessions();
+        List<SessionWindow> sessions = input.sessions().stream()
+                .sorted(Comparator.comparing(session -> session.start(rules.zone()))).toList();
         boolean openSession = sessions.stream().anyMatch(SessionWindow::isOpen);
-        boolean abandoned = sessions.stream().anyMatch(session -> isAbandoned(session, input.now()));
+        Instant now = input.nowInstant() != null ? input.nowInstant() : input.now().atZone(rules.zone()).toInstant();
+        boolean abandoned = sessions.stream().anyMatch(session -> isAbandoned(session, now));
 
         LocalDateTime firstIn = sessions.isEmpty() ? null : sessions.get(0).checkIn();
         LocalDateTime lastOut = sessions.stream()
+                .filter(session -> !session.isOpen())
+                .max(Comparator.comparing(session -> session.end(rules.zone())))
                 .map(SessionWindow::checkOut)
-                .filter(java.util.Objects::nonNull)
-                .max(LocalDateTime::compareTo)
                 .orElse(null);
 
         if (abandoned) {
@@ -74,34 +78,35 @@ public final class DailyAttendanceCalculator {
 
         int workedMinutes = 0;
         int rawOvertime = 0;
-        LocalDateTime endOfWork = input.day().atTime(rules.workEnd());
+        Instant endOfWork = input.day().atTime(rules.workEnd()).atZone(rules.zone()).toInstant();
         for (SessionWindow session : sessions) {
             if (session.isOpen()) {
                 continue;
             }
-            workedMinutes += minutes(session.checkIn(), session.checkOut());
+            workedMinutes += minutes(session.start(rules.zone()), session.end(rules.zone()));
             rawOvertime += input.dayKind().isRestDay()
-                    ? minutes(session.checkIn(), session.checkOut())
+                    ? minutes(session.start(rules.zone()), session.end(rules.zone()))
                     : minutesAfter(session, endOfWork);
         }
         int overtimeMinutes = Math.min(rawOvertime, rules.maxOvertimeMinutesPerDay());
-        int lateMinutes = lateMinutes(input, firstIn);
+        int lateMinutes = lateMinutes(input, sessions.isEmpty() ? null : sessions.get(0).start(rules.zone()));
 
         AttendanceStatus status = status(input, sessions.isEmpty(), lateMinutes);
         return new DailyAttendance(input.day(), input.dayKind(), status, input.leave(), firstIn, lastOut,
                 sessions.size(), workedMinutes, lateMinutes, overtimeMinutes, openSession);
     }
 
-    private boolean isAbandoned(SessionWindow session, LocalDateTime now) {
+    private boolean isAbandoned(SessionWindow session, Instant now) {
         return session.isOpen()
-                && Duration.between(session.checkIn(), now).toHours() >= rules.autoCloseAfterHours();
+                && Duration.between(session.start(rules.zone()), now).toHours() >= rules.autoCloseAfterHours();
     }
 
-    private int lateMinutes(DailyAttendanceInput input, LocalDateTime firstIn) {
+    private int lateMinutes(DailyAttendanceInput input, Instant firstIn) {
         if (firstIn == null || input.dayKind().isRestDay()) {
             return 0;
         }
-        LocalDateTime threshold = input.day().atTime(rules.lateThreshold());
+        Instant threshold = input.day().atTime(rules.workStart()).atZone(rules.zone())
+                .plusMinutes(rules.graceMinutes()).toInstant();
         return (int) Math.max(0, Duration.between(threshold, firstIn).toMinutes());
     }
 
@@ -118,13 +123,15 @@ public final class DailyAttendanceCalculator {
         return lateMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT;
     }
 
-    private static int minutes(LocalDateTime from, LocalDateTime to) {
+    private static int minutes(Instant from, Instant to) {
         return (int) Duration.between(from, to).toMinutes();
     }
 
     /** The part of a closed session that lies after {@code boundary}. */
-    private static int minutesAfter(SessionWindow session, LocalDateTime boundary) {
-        LocalDateTime from = session.checkIn().isAfter(boundary) ? session.checkIn() : boundary;
-        return session.checkOut().isAfter(from) ? minutes(from, session.checkOut()) : 0;
+    private int minutesAfter(SessionWindow session, Instant boundary) {
+        Instant start = session.start(rules.zone());
+        Instant end = session.end(rules.zone());
+        Instant from = start.isAfter(boundary) ? start : boundary;
+        return end.isAfter(from) ? minutes(from, end) : 0;
     }
 }

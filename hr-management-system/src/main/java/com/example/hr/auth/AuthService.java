@@ -92,7 +92,7 @@ public class AuthService {
     public PasswordChanged changePassword(ChangePasswordRequest request) {
         Employee employee = currentEmployee.require();
         if (!passwordEncoder.matches(request.currentPassword(), employee.getPasswordHash())) {
-            throw new UnauthorizedException("The current password is incorrect");
+            throw new BadRequestException("The current password is incorrect");
         }
         if (passwordEncoder.matches(request.newPassword(), employee.getPasswordHash())) {
             throw new BadRequestException("The new password must differ from the current one");

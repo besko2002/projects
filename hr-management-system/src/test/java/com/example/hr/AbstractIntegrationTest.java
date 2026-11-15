@@ -15,7 +15,6 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
-import org.testcontainers.containers.PostgreSQLContainer;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -33,12 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 public abstract class AbstractIntegrationTest {
 
-    @SuppressWarnings("resource")
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
-            .withDatabaseName("hr").withUsername("hr")
-            // Strong enough for the application's own password policy (the production default
-            // used to be the one-word "hr", which is exactly what the policy now rejects).
-            .withPassword("test-only-hr-db-password");
+    static final PostgresTestDatabase POSTGRES = new PostgresTestDatabase();
 
     static {
         POSTGRES.start();

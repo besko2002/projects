@@ -2,6 +2,9 @@ import { ApiError, NETWORK_ERROR_MESSAGE, NETWORK_ERROR_STATUS, toApiError } fro
 import { readToken, writeToken } from './token';
 import type {
   AttendanceRangeResponse,
+  AttendanceSessionRequest,
+  ResetEmployeePasswordRequest,
+  ResetEmployeePasswordResponse,
   AttendanceSummaryRow,
   AuditChangeResponse,
   AuthenticatedUser,
@@ -232,6 +235,11 @@ export const api = {
   patchEmployee: (id: string, payload: PatchEmployeeRequest): Promise<EmployeeRecord> =>
     request<EmployeeRecord>(`/api/employees/${seg(id)}`, { method: 'PATCH', json: payload }),
 
+  resetEmployeePassword: (id: string, payload: ResetEmployeePasswordRequest): Promise<ResetEmployeePasswordResponse> =>
+    request<ResetEmployeePasswordResponse>(`/api/employees/${seg(id)}/reset-password`, {
+      method: 'POST', json: payload,
+    }),
+
   terminateEmployee: (id: string): Promise<EmployeeRecord> =>
     request<EmployeeRecord>(`/api/employees/${seg(id)}/terminate`, { method: 'POST' }),
 
@@ -350,6 +358,19 @@ export const api = {
     request<void>(`/api/leave/holidays/${seg(id)}`, { method: 'DELETE' }),
 
   // ----------------------------------------------------------------- attendance
+  myAttendanceToday: (signal?: AbortSignal): Promise<AttendanceRangeResponse> =>
+    request<AttendanceRangeResponse>('/api/attendance/today', { signal }),
+
+  correctAttendanceSession: (sessionId: string, body: AttendanceSessionRequest): Promise<SessionResponse> =>
+    request<SessionResponse>(`/api/attendance/sessions/${seg(sessionId)}/correct`, {
+      method: 'POST', json: body,
+    }),
+
+  addAttendanceSession: (employeeId: string, body: AttendanceSessionRequest): Promise<SessionResponse> =>
+    request<SessionResponse>(`/api/attendance/employees/${seg(employeeId)}/sessions`, {
+      method: 'POST', json: body,
+    }),
+
   checkIn: (): Promise<SessionResponse> =>
     request<SessionResponse>('/api/attendance/check-in', { method: 'POST' }),
 

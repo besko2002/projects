@@ -49,6 +49,12 @@ class AttendanceController {
         return attendance.checkOut();
     }
 
+    @GetMapping("/today")
+    @Operation(summary = "Your attendance for today in the configured server attendance zone")
+    AttendanceRangeResponse today() {
+        return attendance.myToday();
+    }
+
     @GetMapping("/me")
     @Operation(summary = "Your own days and totals in a range of at most 92 days")
     AttendanceRangeResponse me(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,

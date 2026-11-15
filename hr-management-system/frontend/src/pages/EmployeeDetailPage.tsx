@@ -17,6 +17,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Field } from '../components/Field';
 import { describedBy } from '../components/describedBy';
 import { Pagination } from '../components/Pagination';
+import { ResetPasswordPanel } from '../components/ResetPasswordPanel';
 import { Card, EmptyState, Loading, PageHeader } from '../components/states';
 import { StatusChip } from '../components/StatusChip';
 import { handleTabKeyDown } from '../components/tabKeyboard';
@@ -192,7 +193,7 @@ export function EmployeeDetailPage(): JSX.Element {
       <PageHeader
         title={data?.fullName ?? 'Employee'}
         subtitle={data === null ? undefined : `${data.employeeNumber} · ${data.email}`}
-        actions={<Link to="/employees">Back to employees</Link>}
+        actions={<div className="button-row"><Link to="/employees">Back to employees</Link>{data !== null && <Link to={`/employees/${id}/attendance`}>Manage attendance</Link>}</div>}
       />
 
       {employee.loading && <Loading label="Loading the employee…" />}
@@ -209,6 +210,7 @@ export function EmployeeDetailPage(): JSX.Element {
 
       {data !== null && (
         <>
+          <ResetPasswordPanel key={data.id} employee={data} onReset={employee.reload} />
           <div className="tabs" role="tablist" aria-label="Employee sections" onKeyDown={handleTabKeyDown}>
             <button
               type="button"

@@ -12,12 +12,12 @@ import {
 import { installFetchMock } from '../test/fetchMock';
 import { renderApp } from '../test/helpers';
 import type { RouteHandler } from '../test/fetchMock';
-import { formatMinutes } from '../lib/format';
+import { formatDate, formatMinutes } from '../lib/format';
 
 function dashboardRoutes(overrides: Record<string, RouteHandler> = {}): Record<string, RouteHandler> {
   return {
     ...signedIn(),
-    'GET /api/attendance/me': {
+    'GET /api/attendance/today': {
       body: makeAttendanceRange({ days: [makeDay({ status: 'PRESENT', openSession: true })] }),
     },
     'GET /api/leave/balances/me': {
@@ -30,12 +30,24 @@ function dashboardRoutes(overrides: Record<string, RouteHandler> = {}): Record<s
 
 /** Today with every session closed, so checking in is the available action. */
 const CHECKED_OUT: Record<string, RouteHandler> = {
-  'GET /api/attendance/me': {
+  'GET /api/attendance/today': {
     body: makeAttendanceRange({ days: [makeDay({ status: 'PRESENT', openSession: false })] }),
   },
 };
 
 describe('dashboard', () => {
+  it('uses the server business day rather than a browser-local date to find the open session', async () => {
+    const businessDay = '2030-01-01';
+    const mock = installFetchMock(dashboardRoutes({
+      'GET /api/attendance/today': { body: makeAttendanceRange({ from: businessDay, to: businessDay, days: [makeDay({ day: businessDay, openSession: true })] }) },
+    }));
+    renderApp('/');
+    await screen.findByText('You are currently checked in.');
+    expect(screen.getByText(`Today is ${formatDate(businessDay)} (company calendar).`)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check out' })).toBeEnabled();
+    expect(mock.urlsFor('GET', '/api/attendance/today')).toEqual(['/api/attendance/today']);
+    expect(mock.urlsFor('GET', '/api/attendance/me')).toHaveLength(0);
+  });
   it('offers only the action that fits the open session', async () => {
     installFetchMock(dashboardRoutes());
 
@@ -50,7 +62,7 @@ describe('dashboard', () => {
     const checkIn = new Date(Date.now() - 90 * 60_000).toISOString();
     installFetchMock(
       dashboardRoutes({
-        'GET /api/attendance/me': {
+        'GET /api/attendance/today': {
           body: makeAttendanceRange({
             days: [
               makeDay({
@@ -112,7 +124,7 @@ describe('dashboard', () => {
     expect(await screen.findByText('Checked in.')).toBeInTheDocument();
     expect(mock.callsTo('POST /api/attendance/check-in')).toHaveLength(1);
     // The day is refetched so the new session shows up.
-    expect(mock.urlsFor('GET', '/api/attendance/me').length).toBeGreaterThanOrEqual(2);
+    expect(mock.urlsFor('GET', '/api/attendance/today').length).toBeGreaterThanOrEqual(2);
   });
 
   it('renders the 409 message when a session is already open', async () => {

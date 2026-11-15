@@ -126,7 +126,8 @@ docker compose --env-file .env.local --profile app down
 | Method | Path | Who |
 | --- | --- | --- |
 | POST | `/api/auth/login` | public |
-| POST | `/api/auth/change-password` | any authenticated user |
+| POST | `/api/auth/change-password` | any authenticated user; an incorrect current password returns 400 without ending the session |
+| POST | `/api/employees/{id}/reset-password` | HR, ADMIN — mandatory audit reason; generates a temporary password shown once, revokes existing tokens, forces a password change; no self-reset, HR cannot reset ADMIN |
 | GET | `/api/departments` | any authenticated user |
 | POST / PUT / DELETE | `/api/departments[/{id}]` | HR, ADMIN (delete → 409 while it has employees) |
 | POST | `/api/employees` | HR, ADMIN — returns the temporary password **once** |
@@ -168,6 +169,7 @@ docker compose --env-file .env.local --profile app down
 | POST | `/api/attendance/check-in` | any ACTIVE employee, for themself — 409 if a session is already open today |
 | POST | `/api/attendance/check-out` | same — 409 when nothing is open today |
 | GET | `/api/attendance/me` | self — `from`, `to`, range ≤ **92 days**; days + totals |
+| GET | `/api/attendance/today` | self — today's range in the configured attendance time zone, independent of browser time zone |
 | GET | `/api/attendance/employees/{id}` | self, any ancestor manager, HR, ADMIN — anybody else 404; **never any pay** |
 | GET | `/api/attendance/team/today` | the caller's whole subtree (HR/ADMIN: everyone): in / late / absent / on leave |
 | POST | `/api/attendance/sessions/{id}/correct` | HR, ADMIN — `{checkIn, checkOut?, reason}`, reason **required** |
@@ -383,7 +385,10 @@ invent hours. It is surfaced as `MISSING_CHECKOUT` on its own day and HR correct
 
 **The work day** is the check-in instant rendered in `app.attendance.zone` (default
 `Africa/Cairo`) and is stored on the row, so day queries and exports never depend on the
-server's default zone. Instants themselves are stored in UTC.
+server's default zone. Instants themselves are stored in UTC. The dashboard fetches the company's
+current day from `/api/attendance/today`, not the browser calendar, and refreshes on focus and once a minute.
+Worked time, overtime and abandoned-session age use elapsed instants across daylight-saving transitions;
+local clock fields are presentation only.
 
 **Per-day derivation** (all of it pure and unit-tested):
 
@@ -420,20 +425,25 @@ then deduct), and days outside the employment window (before the hire date, afte
 termination date) are not emitted either.
 
 **HR corrections** (`correct` an existing session, or add a missing one) always carry a
-**mandatory reason**, stamp `corrected_by` and flip `source` to `HR_CORRECTION`. Refused:
+**mandatory reason**, stamp `corrected_by` and flip `source` to `CORRECTION`. HR opens an employee's
+**Manage attendance** screen to add a missing session or correct an existing one. Correction inputs
+explicitly use UTC to avoid ambiguity during repeated daylight-saving hours. Nobody repairs their own
+attendance; another HR/ADMIN must do it. Refused:
 
 | Rule | Status |
 | --- | --- |
 | `checkOut` at or before `checkIn` | 400 |
 | `checkIn` or `checkOut` in the future | 400 |
 | a session longer than 24 hours (exactly 24 h is fine) | 400 |
-| a session starting before the employee's hire date | 400 |
+| a session starting outside the employee's inclusive hire/termination date window | 400 |
 | overlap with another session **of the same employee** | 409 |
 | anybody who is not HR/ADMIN | 403 |
 
 Touching endpoints do **not** overlap (leaving at 13:00 and returning at 13:00 is legal),
 a correction ignores the row it is editing but not the others, and two employees may of
-course share an interval.
+course share an interval. All attendance writes serialize on the employee's database row. An open
+session reserves the remainder of its work day, so corrections cannot insert hours into it and later
+have checkout count those hours twice. Checkout revalidates overlaps too.
 
 Configuration (`app.attendance.*`), all env-overridable:
 
@@ -630,10 +640,18 @@ docker compose --env-file .env.local --profile app up -d --build      # backend 
 |---|---|
 | Everyone | Dashboard (check in/out, balances), Leave requests, Attendance, own Payslips (PDF), Org chart, Profile |
 | Managers (anyone with reports) | My team, Approvals (approve / reject with note), Team calendar, Team today |
-| HR / ADMIN | Employees (search, filters), create/edit/terminate, set manager, audit tab, Departments, Holidays, Payroll runs (create, finalize, PDF/XLSX), Reports |
+| HR / ADMIN | Employees (search, filters), create/edit/terminate, set manager, audit tab, password recovery, employee attendance repair, Departments, Holidays, Payroll runs (create, finalize, PDF/XLSX), Reports |
 
 Rules enforced in the UI (and by the API): the first login forces a password change; a temporary password is shown once;
 salary appears **only** when the API returns it, so managers never see their reports' pay.
+
+**Lost passwords:** HR/ADMIN verify the person's identity, open their employee record, and use **Reset
+password** with a mandatory audit reason. The generated password is returned once with `Cache-Control:
+no-store`, never logged or stored in plaintext, and must be securely shared before dismissing the dialog.
+Reset revokes every prior token and requires a password change on the next login. HR cannot reset ADMIN
+accounts, nobody resets their own account, and terminated accounts cannot be reset. An incorrect current
+password on the self-service change form returns a recoverable 400; a genuinely expired token still
+ends the session. Login throttling/lockout rules still apply.
 
 The sign-in page is a single animated page: the form stays hidden behind an **Enter workspace** button and appears
 on hover, click or keyboard focus (Escape closes it), with the *Sign in* title writing itself letter by letter.
@@ -654,8 +672,31 @@ The screenshots above are regenerated from the running UI with fictional data on
 `cd frontend && node scripts/capture-docs.mjs` (frontend running on :5175; no database is read).
 
 Frontend tests: `cd frontend && npm test -- --run` (Vitest + Testing Library, fetch mocked). Browser tests:
-`npm run e2e` drives sign-in, forced password change, check-in/out, leave request with manager approval, and a
-payroll create/recalculate/finalize run against a real backend and database.
+`npm run e2e` drives sign-in, forced password change, check-in/out, leave request with manager approval,
+payroll create/recalculate/finalize, authorized password recovery, attendance repair, approvals pagination,
+and clocking from a different browser calendar day against a real backend and database. These tests create
+accounts and change payroll: run them against an isolated test stack, never a saved company database.
+
+### Native PostgreSQL backend tests (optional, no Docker)
+
+By default backend integration tests still use Testcontainers. For a native PostgreSQL 16 server, set
+`HR_TEST_DB_URL` to its **postgres maintenance database**, plus `HR_TEST_DB_USERNAME` and
+`HR_TEST_DB_PASSWORD` for a dedicated test-only role with `CREATEDB` (not a superuser or application role).
+Tests create uniquely named `hr_test_*` databases and drop them at JVM exit; they never reuse a supplied
+application database. Java 21 is required.
+
+```bash
+export HR_TEST_DB_URL=jdbc:postgresql://127.0.0.1:55432/postgres
+export HR_TEST_DB_USERNAME=hr_test_runner
+# Supply HR_TEST_DB_PASSWORD through your private environment; never commit it.
+SPRING_DATASOURCE_HIKARI_MINIMUMIDLE=1 ./mvnw -B test \
+  '-DargLine=-Xmx512m -Dspring.test.context.cache.maxSize=1' \
+  '-Dtest=*,!RedisLoginThrottleIntegrationTest'
+```
+
+The command excludes only the unchanged Redis-container suite; it does not prove Redis integration.
+Use the ordinary `./mvnw -B verify` with Docker to include that suite. Migration tests use a separate
+throwaway database from the API integration tests.
 
 ### Frontend Dependency Audit & Security Status
 

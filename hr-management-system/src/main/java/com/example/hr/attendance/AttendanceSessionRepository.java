@@ -1,5 +1,8 @@
 package com.example.hr.attendance;
 
+import com.example.hr.employee.Employee;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -13,7 +16,7 @@ import java.util.UUID;
 
 public interface AttendanceSessionRepository extends JpaRepository<AttendanceSession, UUID> {
 
-    /** Sentinel for {@link #overlaps} when no existing row has to be ignored. */
+    /** Sentinel for {@link #overlapCandidates} when no existing row has to be ignored. */
     UUID NOTHING_EXCLUDED = new UUID(0L, 0L);
 
     List<AttendanceSession> findByEmployeeIdAndWorkDateBetweenOrderByCheckInAsc(
@@ -28,25 +31,27 @@ public interface AttendanceSessionRepository extends JpaRepository<AttendanceSes
     Optional<AttendanceSession> findOpenOn(@Param("employeeId") UUID employeeId,
                                            @Param("workDate") LocalDate workDate);
 
-    /**
-     * True when the employee already has a session whose interval overlaps
-     * {@code [checkIn, checkOut)}. An open session is treated as covering only its own
-     * check-in instant — it cannot be known how far it reaches — and {@code excludeId}
-     * lets a correction ignore the row it is editing (pass {@link #NOTHING_EXCLUDED} when
-     * there is none). Touching endpoints do not overlap: leaving at 13:00 and returning at
-     * 13:00 is legal.
-     */
+    /** All attendance writers take this database row lock before reading any sessions. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select e from Employee e where e.id = :employeeId")
+    Optional<Employee> lockEmployee(@Param("employeeId") UUID employeeId);
+
+    /** Resolve ownership without loading a possibly stale session before acquiring its employee lock. */
+    @Query("select s.employee.id from AttendanceSession s where s.id = :sessionId")
+    Optional<UUID> employeeIdOf(@Param("sessionId") UUID sessionId);
+
+    /** Candidates; open ends are resolved to the next zoned day boundary by the service. */
     @Query("""
-            select count(s) > 0 from AttendanceSession s
+            select s from AttendanceSession s
              where s.employee.id = :employeeId
                and s.id <> :excludeId
                and s.checkIn < :checkOut
-               and coalesce(s.checkOut, s.checkIn) > :checkIn
+               and (s.checkOut is null or s.checkOut > :checkIn)
             """)
-    boolean overlaps(@Param("employeeId") UUID employeeId,
-                     @Param("checkIn") Instant checkIn,
-                     @Param("checkOut") Instant checkOut,
-                     @Param("excludeId") UUID excludeId);
+    List<AttendanceSession> overlapCandidates(@Param("employeeId") UUID employeeId,
+                                              @Param("checkIn") Instant checkIn,
+                                              @Param("checkOut") Instant checkOut,
+                                              @Param("excludeId") UUID excludeId);
 
     /** Every session of a set of employees in a date range — one query for a team view or an export. */
     @Query("""

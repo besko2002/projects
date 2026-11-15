@@ -19,7 +19,8 @@ public record DailyAttendanceInput(
         DayKind dayKind,
         LeaveCoverage leave,
         List<SessionWindow> sessions,
-        LocalDateTime now) {
+        LocalDateTime now,
+        java.time.Instant nowInstant) {
 
     public DailyAttendanceInput {
         if (day == null || dayKind == null || now == null) {
@@ -29,6 +30,11 @@ public record DailyAttendanceInput(
         List<SessionWindow> copy = sessions == null ? List.of() : new java.util.ArrayList<>(sessions);
         copy.sort(Comparator.comparing(SessionWindow::checkIn));
         sessions = Collections.unmodifiableList(copy);
+    }
+
+    public DailyAttendanceInput(LocalDate day, DayKind dayKind, LeaveCoverage leave,
+                                List<SessionWindow> sessions, LocalDateTime now) {
+        this(day, dayKind, leave, sessions, now, null);
     }
 
     public static DailyAttendanceInput of(LocalDate day, DayKind kind, SessionWindow... sessions) {

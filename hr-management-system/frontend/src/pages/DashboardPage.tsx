@@ -8,7 +8,6 @@ import { Banner } from '../components/Banner';
 import { Card, EmptyState, Loading, PageHeader } from '../components/states';
 import { StatusChip } from '../components/StatusChip';
 import { useToast } from '../components/useToast';
-import { today } from '../lib/dates';
 import { formatDate, formatMinutes, formatTime } from '../lib/format';
 import { useResource } from '../lib/useResource';
 
@@ -17,12 +16,11 @@ const RECENT_SIZE = 5;
 export function DashboardPage(): JSX.Element {
   const { user } = useAuth();
   const toast = useToast();
-  const day = today();
-
   const attendance = useResource<AttendanceRangeResponse>(
-    (signal) => api.myAttendance(day, day, signal),
-    `attendance-today-${day}`,
+    (signal) => api.myAttendanceToday(signal),
+    'attendance-business-today',
   );
+  const day = attendance.data?.from;
   const balances = useResource<LeaveBalanceResponse[]>(
     (signal) => api.myLeaveBalances(undefined, signal),
     'my-balances',
@@ -34,6 +32,15 @@ export function DashboardPage(): JSX.Element {
 
   const [clockError, setClockError] = useState<string | null>(null);
   const [busy, setBusy] = useState<'in' | 'out' | null>(null);
+  const reloadAttendance = attendance.reload;
+  useEffect(() => {
+    const timer = window.setInterval(reloadAttendance, 60_000);
+    window.addEventListener('focus', reloadAttendance);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', reloadAttendance);
+    };
+  }, [reloadAttendance]);
 
   const dayToday = attendance.data?.days[0] ?? null;
   const openSession = dayToday?.openSession === true;
@@ -84,7 +91,7 @@ export function DashboardPage(): JSX.Element {
     <>
       <PageHeader
         title={`Hello, ${user?.fullName ?? 'there'}`}
-        subtitle={`Today is ${formatDate(day)}.`}
+        subtitle={day === undefined ? 'Loading the business date…' : `Today is ${formatDate(day)} (company calendar).`}
       />
 
       <div className="grid grid-2">
@@ -135,7 +142,7 @@ export function DashboardPage(): JSX.Element {
             <button
               type="button"
               className={openSession ? 'button' : 'button button-primary'}
-              disabled={busy !== null || openSession}
+              disabled={attendance.loading || attendance.error !== null || dayToday === null || busy !== null || openSession}
               onClick={() => {
                 void clock('in');
               }}
@@ -145,7 +152,7 @@ export function DashboardPage(): JSX.Element {
             <button
               type="button"
               className={openSession ? 'button button-primary' : 'button'}
-              disabled={busy !== null || !openSession}
+              disabled={attendance.loading || attendance.error !== null || dayToday === null || busy !== null || !openSession}
               onClick={() => {
                 void clock('out');
               }}
