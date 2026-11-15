@@ -100,3 +100,24 @@ export function getUpcomingDays(count = 7, startDate = new Date()): DayOption[] 
 
   return days;
 }
+
+export function formatLocalDate(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function getDaysBetween(startStr: string, endStr: string): string[] {
+  const days: string[] = [];
+  const [sy, sm, sd] = startStr.split('-').map(Number);
+  const [ey, em, ed] = endStr.split('-').map(Number);
+  const current = new Date(sy, sm - 1, sd, 12, 0, 0);
+  const end = new Date(ey, em - 1, ed, 12, 0, 0);
+
+  while (current <= end) {
+    days.push(formatLocalDate(current));
+    current.setDate(current.getDate() + 1);
+  }
+  return days;
+}

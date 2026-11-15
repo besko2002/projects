@@ -4,9 +4,16 @@ import * as moviesApi from '../../api/moviesApi';
 import * as schedulesApi from '../../api/schedulesApi';
 import * as adminApi from '../../api/adminApi';
 import { ApiException } from '../../api/client';
+import { formatLocalDate, getDaysBetween } from '../../utils/dateUtils';
 import type { MovieSummary } from '../../types/movie';
 import type { ScheduleSummary } from '../../types/schedule';
 import type { TheaterSummary } from '../../types/admin';
+
+export interface BulkSlotResult {
+  slot: string;
+  status: 'created' | 'conflict' | 'past' | 'error';
+  reason: string;
+}
 
 export function AdminShowtimesPage(): React.JSX.Element {
   const [schedules, setSchedules] = useState<ScheduleSummary[]>([]);
@@ -44,6 +51,7 @@ export function AdminShowtimesPage(): React.JSX.Element {
   const [bulkVipPrice, setBulkVipPrice] = useState<number>(18.0);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
   const [isBulkRunning, setIsBulkRunning] = useState(false);
+  const [bulkResults, setBulkResults] = useState<BulkSlotResult[] | null>(null);
 
   const reloadSchedules = async () => {
     try {
@@ -135,13 +143,14 @@ export function AdminShowtimesPage(): React.JSX.Element {
     setIsFormOpen(true);
     setError(null);
     setSuccess(null);
+    setBulkResults(null);
 
     const today = new Date();
     const future = new Date();
     future.setDate(today.getDate() + 7);
 
-    setBulkStartDate(today.toISOString().slice(0, 10));
-    setBulkEndDate(future.toISOString().slice(0, 10));
+    setBulkStartDate(formatLocalDate(today));
+    setBulkEndDate(formatLocalDate(future));
   };
 
   const handleSingleSubmit = async (e: React.FormEvent) => {
@@ -207,34 +216,36 @@ export function AdminShowtimesPage(): React.JSX.Element {
     setIsBulkRunning(true);
     setError(null);
     setSuccess(null);
+    setBulkResults(null);
     setBulkProgress('Initializing schedule generation…');
 
     let createdCount = 0;
-    let skippedCount = 0;
+    let conflictCount = 0;
+    let pastCount = 0;
+    let errorCount = 0;
+    const results: BulkSlotResult[] = [];
 
-    const start = new Date(`${bulkStartDate}T00:00:00`);
-    const end = new Date(`${bulkEndDate}T23:59:59`);
-
-    const days: string[] = [];
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      days.push(d.toISOString().slice(0, 10));
-    }
-
+    const days = getDaysBetween(bulkStartDate, bulkEndDate);
     const totalSlots = days.length * times.length;
     let currentSlot = 0;
 
     for (const day of days) {
       for (const time of times) {
         currentSlot++;
-        setBulkProgress(`Processing slot ${currentSlot} of ${totalSlots} (${day} ${time})…`);
+        const slotLabel = `${day} ${time}`;
+        setBulkProgress(`Processing slot ${currentSlot} of ${totalSlots} (${slotLabel})…`);
+
+        const [hh, mm] = time.split(':').map(Number);
+        const [y, m, d] = day.split('-').map(Number);
+        const dt = new Date(y, m - 1, d, hh, mm, 0);
+
+        if (dt.getTime() <= Date.now()) {
+          pastCount++;
+          results.push({ slot: slotLabel, status: 'past', reason: 'Past showtime (skipped)' });
+          continue;
+        }
 
         try {
-          const dt = new Date(`${day}T${time}:00`);
-          if (dt.getTime() <= Date.now()) {
-            skippedCount++;
-            continue;
-          }
-
           const startInstant = dt.toISOString();
           await adminApi.createSchedule({
             movieId: Number(bulkMovieId),
@@ -244,15 +255,33 @@ export function AdminShowtimesPage(): React.JSX.Element {
             vipPrice: Number(bulkVipPrice),
           });
           createdCount++;
-        } catch {
-          skippedCount++;
+          results.push({ slot: slotLabel, status: 'created', reason: 'Created successfully' });
+        } catch (err) {
+          if (err instanceof ApiException) {
+            if (err.status === 409) {
+              conflictCount++;
+              results.push({ slot: slotLabel, status: 'conflict', reason: 'Auditorium occupied (time conflict)' });
+            } else if (err.status === 401 || err.status === 403) {
+              errorCount++;
+              results.push({ slot: slotLabel, status: 'error', reason: `Permission error (${err.status}): ${err.message || 'Forbidden'}` });
+            } else {
+              errorCount++;
+              results.push({ slot: slotLabel, status: 'error', reason: `API error (${err.status}): ${err.message || 'Validation error'}` });
+            }
+          } else {
+            errorCount++;
+            results.push({ slot: slotLabel, status: 'error', reason: 'Network or client error' });
+          }
         }
       }
     }
 
     setIsBulkRunning(false);
     setBulkProgress(null);
-    setSuccess(`Bulk generation complete: created ${createdCount} showtimes; ${skippedCount} conflicting or past slots were skipped.`);
+    setBulkResults(results);
+    setSuccess(
+      `Bulk generation complete: created ${createdCount} showtimes; ${conflictCount} conflicts, ${pastCount} past, and ${errorCount} errors.`,
+    );
     setIsFormOpen(false);
     await reloadSchedules();
   };
@@ -385,6 +414,83 @@ export function AdminShowtimesPage(): React.JSX.Element {
           }}
         >
           ✓ {success}
+        </div>
+      )}
+
+      {bulkResults && bulkResults.length > 0 && (
+        <div
+          data-testid="bulk-results-panel"
+          style={{
+            marginBottom: 'var(--space-5)',
+            padding: '16px',
+            background: '#fff',
+            border: '2px solid var(--ink)',
+            borderRadius: '4px',
+            boxShadow: 'var(--shadow-card)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <h3 style={{ margin: 0, fontSize: '16px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Bulk Schedule Slot Report ({bulkResults.length} slots processed)
+            </h3>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => setBulkResults(null)}
+              style={{ padding: '4px 8px', fontSize: '12px' }}
+            >
+              Dismiss Report
+            </button>
+          </div>
+          <div style={{ maxHeight: '240px', overflowY: 'auto', border: '1px solid var(--sand)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead>
+                <tr style={{ background: 'var(--sand-light, #fbf7ee)', textAlign: 'left', borderBottom: '1px solid var(--sand)' }}>
+                  <th style={{ padding: '6px 10px' }}>Slot Time</th>
+                  <th style={{ padding: '6px 10px' }}>Outcome</th>
+                  <th style={{ padding: '6px 10px' }}>Details / Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bulkResults.map((r, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid var(--sand-light)' }}>
+                    <td style={{ padding: '6px 10px', fontWeight: 600 }}>{r.slot}</td>
+                    <td style={{ padding: '6px 10px' }}>
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          padding: '2px 6px',
+                          borderRadius: '3px',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          textTransform: 'uppercase',
+                          background:
+                            r.status === 'created'
+                              ? '#d4edda'
+                              : r.status === 'conflict'
+                              ? '#fff3cd'
+                              : r.status === 'past'
+                              ? '#e2e3e5'
+                              : '#f8d7da',
+                          color:
+                            r.status === 'created'
+                              ? '#155724'
+                              : r.status === 'conflict'
+                              ? '#856404'
+                              : r.status === 'past'
+                              ? '#383d41'
+                              : '#721c24',
+                        }}
+                      >
+                        {r.status}
+                      </span>
+                    </td>
+                    <td style={{ padding: '6px 10px', color: '#555' }}>{r.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
