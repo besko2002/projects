@@ -87,10 +87,21 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/payments/stripe/webhook").permitAll()
                         .requestMatchers(HttpMethod.GET, PUBLIC_GET_PATHS).permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                        // Allow frontend SPA and static assets to be served on all non-API GET/HEAD requests (e.g. /foo)
-                        .requestMatchers(request -> ("GET".equalsIgnoreCase(request.getMethod())
-                                || "HEAD".equalsIgnoreCase(request.getMethod()))
-                                && !request.getRequestURI().startsWith("/api/")).permitAll()
+                        // Allow frontend SPA and static assets to be served on non-API/non-actuator GET/HEAD requests (e.g. /foo, /assets/...)
+                        .requestMatchers(request -> {
+                            String method = request.getMethod();
+                            if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {
+                                return false;
+                            }
+                            String uri = request.getRequestURI();
+                            if (uri.equals("/api") || uri.startsWith("/api/")) {
+                                return false;
+                            }
+                            if (uri.equals("/actuator") || uri.startsWith("/actuator/")) {
+                                return false;
+                            }
+                            return true;
+                        }).permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(authenticationEntryPoint)

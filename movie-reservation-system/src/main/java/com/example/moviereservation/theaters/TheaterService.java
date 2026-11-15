@@ -125,6 +125,12 @@ public class TheaterService {
         return seatRepository.countByTheater_Id(id);
     }
 
+    /** @return total number of theaters in the database */
+    @Transactional(readOnly = true)
+    public long count() {
+        return theaterRepository.count();
+    }
+
     /**
      * Creates a theater and generates all of its seats.
      *

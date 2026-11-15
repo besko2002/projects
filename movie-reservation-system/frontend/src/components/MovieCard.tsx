@@ -55,14 +55,21 @@ export function MovieCard({
               : undefined
           }
         >
-          <span className="stamp">{primaryGenre}</span>
-          <b>{movie.title}</b>
+          {!encodedPosterUrl && (
+            <>
+              <span className="stamp">{primaryGenre}</span>
+              <b>{movie.title}</b>
+            </>
+          )}
         </div>
       </Link>
 
       <div className="perf" aria-hidden="true" />
 
       <div className="stub">
+        <h3 className="card-movie-title" title={movie.title}>
+          {movie.title}
+        </h3>
         <div className="meta">
           <span>{formatDuration(movie.durationMinutes)}</span>
           {minPrice !== null ? (

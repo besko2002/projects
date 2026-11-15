@@ -316,15 +316,9 @@ export function AdminGenresPage(): React.JSX.Element {
                       </button>
                       <button
                         type="button"
-                        className="btn-ghost"
+                        className="btn-ghost danger"
                         onClick={() => handleDelete(genre.id, genre.name)}
                         disabled={deletingId === genre.id}
-                        style={{
-                          padding: '4px 10px',
-                          fontSize: '13px',
-                          color: 'var(--red)',
-                          borderColor: 'var(--red)',
-                        }}
                         aria-label={`Delete ${genre.name}`}
                       >
                         {deletingId === genre.id ? 'Deleting…' : 'Delete'}

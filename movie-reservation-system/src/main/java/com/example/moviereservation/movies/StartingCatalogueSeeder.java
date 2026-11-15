@@ -12,6 +12,8 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -44,17 +46,20 @@ public class StartingCatalogueSeeder {
     private final GenreService genreService;
     private final TheaterService theaterService;
     private final ScheduleService scheduleService;
+    private final TransactionTemplate transactionTemplate;
 
     public StartingCatalogueSeeder(JdbcTemplate jdbcTemplate,
                                    MovieService movieService,
                                    GenreService genreService,
                                    TheaterService theaterService,
-                                   ScheduleService scheduleService) {
+                                   ScheduleService scheduleService,
+                                   PlatformTransactionManager transactionManager) {
         this.jdbcTemplate = jdbcTemplate;
         this.movieService = movieService;
         this.genreService = genreService;
         this.theaterService = theaterService;
         this.scheduleService = scheduleService;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -63,11 +68,41 @@ public class StartingCatalogueSeeder {
     }
 
     /**
-     * Executes the starting catalogue seeding if the database has no movies and has not yet run.
+     * Executes the starting catalogue seeding if the database is empty and has not yet run.
+     * Uses a PostgreSQL advisory lock to ensure only one instance seeds in concurrent startup scenarios,
+     * and wraps creation in a strict transaction so partial seeding cannot occur on failure.
      *
      * @return {@code true} if starting content was seeded, {@code false} if skipped
      */
     public synchronized boolean seedIfEmpty() {
+        boolean lockAcquired = false;
+        try {
+            Boolean locked = jdbcTemplate.queryForObject(
+                    "SELECT pg_try_advisory_lock(84729104)", Boolean.class);
+            lockAcquired = Boolean.TRUE.equals(locked);
+        } catch (Exception ex) {
+            log.debug("Advisory lock not available or failed: {}; proceeding with instance-level synchronization", ex.getMessage());
+            lockAcquired = true;
+        }
+
+        if (!lockAcquired) {
+            log.info("Another instance holds the starting catalogue seeder lock; skipping.");
+            return false;
+        }
+
+        try {
+            Boolean result = transactionTemplate.execute(status -> doSeedIfEmpty());
+            return Boolean.TRUE.equals(result);
+        } finally {
+            try {
+                jdbcTemplate.queryForObject("SELECT pg_advisory_unlock(84729104)", Boolean.class);
+            } catch (Exception ex) {
+                log.debug("Failed to release advisory lock: {}", ex.getMessage());
+            }
+        }
+    }
+
+    private boolean doSeedIfEmpty() {
         try {
             Integer count = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM app_metadata WHERE key = 'starting_catalogue_seeded'", Integer.class);
@@ -79,8 +114,8 @@ public class StartingCatalogueSeeder {
             log.warn("Could not check app_metadata for starting catalogue seeder: {}", ex.getMessage());
         }
 
-        if (movieService.count() > 0) {
-            log.info("Existing catalogue detected (movies count > 0); skipping initial content seeding to preserve saved database.");
+        if (movieService.count() > 0 || theaterService.count() > 0) {
+            log.info("Existing catalogue detected (movies > 0 or theaters > 0); skipping initial content seeding to preserve saved database.");
             recordMetadata("skipped_existing_data");
             return false;
         }
@@ -308,6 +343,9 @@ public class StartingCatalogueSeeder {
         return result;
     }
 
+    private record ScheduleWindow(OffsetDateTime startTime, OffsetDateTime endTime) {
+    }
+
     private void ensureSchedules(List<Long> movieIds, List<TheaterSpec> theaters, int days) {
         ZoneId zone = scheduleService.getZone();
         LocalDate today = LocalDate.now(zone);
@@ -324,10 +362,15 @@ public class StartingCatalogueSeeder {
                         null, theater.id(), targetDate, null, null, 0, 100, List.of("startTime,asc")
                 ).content();
 
+                List<ScheduleWindow> windows = new ArrayList<>();
+                for (ScheduleSummaryDto s : existing) {
+                    windows.add(new ScheduleWindow(s.startTime(), s.endTime()));
+                }
+
                 List<LocalTime> times = new ArrayList<>(theater.standardTimes());
 
                 if (isToday) {
-                    boolean hasFarSlot = existing.stream().anyMatch(s -> s.startTime().isAfter(now.plusHours(2).plusMinutes(35)));
+                    boolean hasFarSlot = windows.stream().anyMatch(w -> w.startTime().isAfter(now.plusHours(2).plusMinutes(35)));
                     if (!hasFarSlot && now.getHour() < 21) {
                         OffsetDateTime candidateFar = now.plusHours(2).plusMinutes(45).truncatedTo(ChronoUnit.HOURS);
                         if (candidateFar.isBefore(now.plusHours(2).plusMinutes(35))) {
@@ -338,6 +381,8 @@ public class StartingCatalogueSeeder {
                         }
                     }
                 }
+
+                times.sort(java.util.Comparator.naturalOrder());
 
                 for (int slotIdx = 0; slotIdx < times.size(); slotIdx++) {
                     LocalTime time = times.get(slotIdx);
@@ -352,24 +397,21 @@ public class StartingCatalogueSeeder {
                     int durationMinutes = movieService.getDurationMinutes(movieId);
                     OffsetDateTime endTime = startTime.plusMinutes(durationMinutes + bufferMinutes);
 
-                    boolean collision = existing.stream().anyMatch(s ->
-                            startTime.isBefore(s.endTime()) && endTime.isAfter(s.startTime())
+                    boolean collision = windows.stream().anyMatch(w ->
+                            startTime.isBefore(w.endTime()) && endTime.isAfter(w.startTime())
                     );
                     if (collision) {
                         continue;
                     }
 
-                    try {
-                        scheduleService.createSchedule(new CreateScheduleRequest(
-                                movieId,
-                                theater.id(),
-                                startTime,
-                                theater.basePrice(),
-                                theater.vipPrice()
-                        ));
-                    } catch (ConflictException | BadRequestException ex) {
-                        log.debug("Skipping schedule collision: {}", ex.getMessage());
-                    }
+                    scheduleService.createSchedule(new CreateScheduleRequest(
+                            movieId,
+                            theater.id(),
+                            startTime,
+                            theater.basePrice(),
+                            theater.vipPrice()
+                    ));
+                    windows.add(new ScheduleWindow(startTime, endTime));
                 }
             }
         }

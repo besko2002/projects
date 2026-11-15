@@ -507,15 +507,9 @@ export function AdminMoviesPage(): React.JSX.Element {
                       </button>
                       <button
                         type="button"
-                        className="btn-ghost"
+                        className="btn-ghost danger"
                         onClick={() => handleDelete(m.id, m.title)}
                         disabled={deletingId === m.id}
-                        style={{
-                          padding: '4px 10px',
-                          fontSize: '13px',
-                          color: 'var(--red)',
-                          borderColor: 'var(--red)',
-                        }}
                         aria-label={`Delete ${m.title}`}
                       >
                         {deletingId === m.id ? 'Deleting…' : 'Delete'}

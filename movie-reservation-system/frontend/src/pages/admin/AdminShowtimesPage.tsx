@@ -959,15 +959,9 @@ export function AdminShowtimesPage(): React.JSX.Element {
                     <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                       <button
                         type="button"
-                        className="btn-ghost"
+                        className="btn-ghost danger"
                         onClick={() => handleDelete(s.id, `${s.movieTitle} @ ${s.theaterName} (${dateStr} ${timeStr})`)}
                         disabled={deletingId === s.id}
-                        style={{
-                          padding: '4px 10px',
-                          fontSize: '13px',
-                          color: 'var(--red)',
-                          borderColor: 'var(--red)',
-                        }}
                         aria-label={`Delete showtime #${s.id}`}
                       >
                         {deletingId === s.id ? 'Deleting…' : 'Delete'}

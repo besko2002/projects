@@ -493,15 +493,9 @@ export function AdminHallsPage(): React.JSX.Element {
                       </button>
                       <button
                         type="button"
-                        className="btn-ghost"
+                        className="btn-ghost danger"
                         onClick={() => handleDelete(hall.id, hall.name)}
                         disabled={deletingId === hall.id}
-                        style={{
-                          padding: '4px 10px',
-                          fontSize: '13px',
-                          color: 'var(--red)',
-                          borderColor: 'var(--red)',
-                        }}
                         aria-label={`Delete ${hall.name}`}
                       >
                         {deletingId === hall.id ? 'Deleting…' : 'Delete'}

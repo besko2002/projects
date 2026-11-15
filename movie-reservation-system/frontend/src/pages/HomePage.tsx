@@ -4,7 +4,7 @@ import { TopBar } from '../components/TopBar';
 import { DateSelector } from '../components/DateSelector';
 import { GenreChips } from '../components/GenreChips';
 import { MovieCard } from '../components/MovieCard';
-import type { GenreDto, MovieSummary } from '../types/movie';
+import type { GenreDto, MovieDto, MovieSummary } from '../types/movie';
 import type { ScheduleSummary } from '../types/schedule';
 import * as moviesApi from '../api/moviesApi';
 import * as schedulesApi from '../api/schedulesApi';
@@ -147,6 +147,33 @@ export function HomePage(): React.JSX.Element {
 
   const nextFeaturedShowtime = featuredSchedules[0] || null;
 
+  const [featuredDetail, setFeaturedDetail] = useState<MovieDto | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+    if (!featuredMovie) return;
+
+    moviesApi
+      .getMovie(featuredMovie.id)
+      .then((data) => {
+        if (!ignore) {
+          setFeaturedDetail(data);
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          setFeaturedDetail(null);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [featuredMovie]);
+
+  const activeFeaturedDetail =
+    featuredDetail && featuredDetail.id === featuredMovie?.id ? featuredDetail : null;
+
   const [todayLabel] = useState<string>(() => {
     const now = new Date();
     return now.toLocaleDateString('en-US', {
@@ -211,27 +238,80 @@ export function HomePage(): React.JSX.Element {
         {/* Featured Letter-board Banner */}
         {featuredMovie && (
           <section className="feature" aria-label="Featured Movie">
-            <div className="art p1">
-              <b>{featuredMovie.title}</b>
+            <div
+              className="art p1"
+              style={
+                featuredMovie.posterUrl
+                  ? {
+                      backgroundImage: `url("${featuredMovie.posterUrl}")`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                    }
+                  : undefined
+              }
+            >
+              {!featuredMovie.posterUrl && <b>{featuredMovie.title}</b>}
             </div>
             <div className="body">
               <div className="board" aria-label="Featured Showtime Details">
-                <span>TONIGHT</span>
+                <span>{nextFeaturedShowtime ? 'TONIGHT' : 'NOW PLAYING'}</span>
                 {nextFeaturedShowtime && (
                   <>
                     <span>{formatTime(nextFeaturedShowtime.startTime)}</span>
                     <span>{nextFeaturedShowtime.theaterName.toUpperCase()}</span>
+                    <span>STD {formatMoney(nextFeaturedShowtime.basePrice)}</span>
+                    <span>VIP {formatMoney(nextFeaturedShowtime.vipPrice)}</span>
                   </>
                 )}
               </div>
-              <p className="soft">
-                Experience the latest cinema release with crystal clear projection and immersive sound.
-                <br />
-                {formatDuration(featuredMovie.durationMinutes)}
-                {selectedGenre && ` · ${selectedGenre}`}
-                {nextFeaturedShowtime &&
-                  ` · Standard ${formatMoney(nextFeaturedShowtime.basePrice)} · VIP ${formatMoney(nextFeaturedShowtime.vipPrice)}`}
+              <h2
+                style={{
+                  fontFamily: 'var(--display)',
+                  fontSize: '32px',
+                  margin: 'var(--space-2) 0',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  color: 'var(--ink)',
+                }}
+              >
+                {featuredMovie.title}
+              </h2>
+              <p className="soft" style={{ fontSize: '15px', lineHeight: 1.6, margin: '0 0 var(--space-3) 0' }}>
+                {activeFeaturedDetail?.description || 'A timeless cinematic presentation on the grand retro screen.'}
               </p>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '16px',
+                  flexWrap: 'wrap',
+                  fontSize: '13px',
+                  marginBottom: 'var(--space-4)',
+                  color: 'var(--ink)',
+                }}
+              >
+                <span>
+                  <strong>Duration:</strong> {formatDuration(featuredMovie.durationMinutes)}
+                </span>
+                {activeFeaturedDetail?.genres && activeFeaturedDetail.genres.length > 0 && (
+                  <span>
+                    <strong>Genres:</strong> {activeFeaturedDetail.genres.map((g) => g.name).join(', ')}
+                  </span>
+                )}
+                {nextFeaturedShowtime ? (
+                  <>
+                    <span>
+                      <strong>Hall:</strong> {nextFeaturedShowtime.theaterName}
+                    </span>
+                    <span>
+                      <strong>Admission:</strong> Standard {formatMoney(nextFeaturedShowtime.basePrice)} · VIP {formatMoney(nextFeaturedShowtime.vipPrice)}
+                    </span>
+                  </>
+                ) : (
+                  <span>
+                    <strong>Showtimes:</strong> Check programme below
+                  </span>
+                )}
+              </div>
               <div className="acts">
                 {nextFeaturedShowtime ? (
                   <Link to={`/book/${nextFeaturedShowtime.id}`} className="btn red">

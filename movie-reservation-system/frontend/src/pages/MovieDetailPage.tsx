@@ -187,8 +187,12 @@ export function MovieDetailPage(): React.JSX.Element {
                   : undefined
               }
             >
-              <span className="stamp">{movie.genres?.[0]?.name || 'FEATURE'}</span>
-              <b>{movie.title}</b>
+              {!encodedPosterUrl && (
+                <>
+                  <span className="stamp">{movie.genres?.[0]?.name || 'FEATURE'}</span>
+                  <b>{movie.title}</b>
+                </>
+              )}
             </div>
             <div className="perf" aria-hidden="true" />
             <div className="stub">

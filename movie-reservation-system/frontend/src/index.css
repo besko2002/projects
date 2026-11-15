@@ -378,6 +378,57 @@ h2 {
   color: var(--red-deep);
 }
 
+/* Retro theme ghost and action buttons for tables and secondary controls */
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: var(--paper, #fff);
+  color: var(--ink);
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  padding: 5px 12px;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 var(--ink);
+  transition: transform var(--transition), box-shadow var(--transition), background var(--transition);
+  text-decoration: none;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--ink);
+  background: var(--sand-light, #fbf7ee);
+}
+
+.btn-ghost:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--ink);
+}
+
+.btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-ghost.danger,
+.btn-ghost-danger {
+  color: var(--red);
+  border-color: var(--red);
+  box-shadow: 2px 2px 0 var(--red);
+}
+
+.btn-ghost.danger:hover:not(:disabled),
+.btn-ghost-danger:hover:not(:disabled) {
+  background: #fdf2f2;
+  box-shadow: 3px 3px 0 var(--red);
+}
+
 /* Interactive Focus Rings (WCAG AA compliant) */
 button:focus-visible,
 a:focus-visible,
@@ -581,13 +632,17 @@ input:focus-visible {
 }
 
 .poster {
-  height: 270px;
+  aspect-ratio: 2 / 3;
+  min-height: 360px;
+  height: auto;
   position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   padding: 16px;
+  background-size: cover;
+  background-position: center;
 }
 
 .poster::before {
@@ -673,7 +728,20 @@ input:focus-visible {
 
 /* Ticket Stub Section */
 .stub {
-  padding: 16px 24px 20px;
+  padding: 16px 20px 20px;
+}
+
+.stub .card-movie-title {
+  font-family: var(--display);
+  font-size: 26px;
+  line-height: 1.05;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 8px 0;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .meta {
