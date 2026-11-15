@@ -66,7 +66,9 @@ class GoogleAuthIntegrationTest {
 
     @BeforeEach
     void setupVerifier() {
-        googleTokenVerifier.setTestKeyProvider(kid -> "test-key-1".equals(kid) ? testKeyPair.getPublic() : null);
+        com.example.moviereservation.users.google.GoogleTestHooks.setTestKeyProvider(
+                googleTokenVerifier,
+                kid -> "test-key-1".equals(kid) ? testKeyPair.getPublic() : null);
     }
 
     private String createGoogleToken(String sub, String email, String name, boolean emailVerified,

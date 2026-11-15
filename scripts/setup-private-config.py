@@ -25,9 +25,15 @@ CONFIG_PATH = CONFIG_DIR / 'movies.json'
 def mask(value: str) -> str:
     if not value:
         return "<unset>"
-    if len(value) <= 8:
-        return "****"
-    return value[:4] + "...." + value[-4:]
+    return "******** (configured, hidden)"
+
+
+def mask_db_url(url: str) -> str:
+    if not url:
+        return "<not configured>"
+    import re
+    # Mask password in URI format postgresql://user:password@host:port/db
+    return re.sub(r'://([^:]+):([^@]+)@', r'://\1:****@', str(url))
 
 
 def print_status(config: dict):
@@ -38,25 +44,27 @@ def print_status(config: dict):
         return
 
     keys_to_report = [
-        ("DB_URL", False),
-        ("SERVER_PORT", False),
-        ("APP_BASE_URL", False),
-        ("ADMIN_EMAIL", False),
-        ("ADMIN_PASSWORD", True),
-        ("JWT_SECRET", True),
-        ("STRIPE_SECRET_KEY", True),
-        ("STRIPE_WEBHOOK_SECRET", True),
-        ("GOOGLE_CLIENT_ID", False),
-        ("RESEND_API_KEY", True),
-        ("MAIL_FROM", False),
+        ("DB_URL", "db_url"),
+        ("SERVER_PORT", "plain"),
+        ("APP_BASE_URL", "plain"),
+        ("ADMIN_EMAIL", "plain"),
+        ("ADMIN_PASSWORD", "secret"),
+        ("JWT_SECRET", "secret"),
+        ("STRIPE_SECRET_KEY", "secret"),
+        ("STRIPE_WEBHOOK_SECRET", "secret"),
+        ("GOOGLE_CLIENT_ID", "plain"),
+        ("RESEND_API_KEY", "secret"),
+        ("MAIL_FROM", "plain"),
     ]
 
-    for key, is_secret in keys_to_report:
+    for key, display_type in keys_to_report:
         val = config.get(key)
         if not val:
             display = "<not configured>"
-        elif is_secret:
+        elif display_type == "secret":
             display = mask(str(val))
+        elif display_type == "db_url":
+            display = mask_db_url(str(val))
         else:
             display = str(val)
         print(f"  - {key}: {display}")
@@ -74,9 +82,12 @@ def main():
     config = {}
     if CONFIG_PATH.exists():
         try:
-            config = json.loads(CONFIG_PATH.read_text())
+            raw = CONFIG_PATH.read_text(encoding='utf-8')
+            config = json.loads(raw) if raw.strip() else {}
         except Exception as e:
-            print(f"Warning: Could not read existing config at {CONFIG_PATH}: {e}", file=sys.stderr)
+            print(f"Error: Existing config file at {CONFIG_PATH} is corrupted or unparsable: {e}", file=sys.stderr)
+            print("Aborting to prevent overwriting or data loss. Restore or fix the file manually.", file=sys.stderr)
+            sys.exit(1)
 
     if args.status:
         print_status(config)
@@ -116,7 +127,12 @@ def main():
     if new_base_url:
         config["APP_BASE_URL"] = new_base_url
 
-    # Write securely
+    # Write securely with backup and atomic replace
+    if CONFIG_PATH.exists():
+        backup_path = CONFIG_PATH.with_suffix('.bak')
+        backup_path.write_text(CONFIG_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+        backup_path.chmod(0o600)
+
     temp_path = CONFIG_PATH.with_suffix('.tmp')
     with open(temp_path, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=2)
