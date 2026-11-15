@@ -14,7 +14,7 @@ export function PaymentSuccessPage(): React.JSX.Element {
   const [ticketId, setTicketId] = useState<number | null>(() => {
     try {
       const stored = sessionStorage.getItem(PENDING_TICKET_KEY);
-      return stored ? Number(stored) : null;
+      return stored && Number(stored) > 0 ? Number(stored) : null;
     } catch {
       return null;
     }
@@ -28,121 +28,163 @@ export function PaymentSuccessPage(): React.JSX.Element {
   const startTimeRef = useRef<number>(0);
   const transientRetriesRef = useRef<number>(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pollRef = useRef<(id: number) => Promise<void>>(async () => {});
+  const generationRef = useRef<number>(0);
+  const disposedRef = useRef<boolean>(false);
+  const activeTicketIdRef = useRef<number | null>(ticketId);
 
-  const runPolling = useCallback(async (idToPoll: number) => {
-    try {
-      const currentTicket = await ticketsApi.getTicket(idToPoll);
-      setTicket(currentTicket);
-
-      // P2-1: Treat every status other than PENDING_PAYMENT as final and render it
-      if (currentTicket.status !== 'PENDING_PAYMENT') {
-        setIsPolling(false);
-        try {
-          sessionStorage.removeItem(PENDING_TICKET_KEY);
-        } catch {
-          // Ignore
-        }
-        return;
-      }
-
-      // Check poll budget (~60s)
-      if (Date.now() - startTimeRef.current >= POLL_BUDGET_MS) {
-        setIsPolling(false);
-        setTimeoutReached(true);
-        return;
-      }
-
-      timerRef.current = setTimeout(() => {
-        void pollRef.current(idToPoll);
-      }, 1000);
-    } catch (err) {
-      if (err instanceof ApiException) {
-        // Stop with a clear message on 401/403/404 (P2-1)
-        if (err.status === 401 || err.status === 403) {
-          setIsPolling(false);
-          setError('Session expired or access denied. Please sign in to view your tickets.');
-          return;
-        }
-        if (err.status === 404) {
-          setIsPolling(false);
-          setError('Ticket not found. Please check My tickets for your booking history.');
-          return;
-        }
-      }
-
-      // Retry transient errors with backoff
-      transientRetriesRef.current += 1;
-      const backoff = Math.min(1000 * Math.pow(1.4, transientRetriesRef.current), 4000);
-
-      if (Date.now() + backoff - startTimeRef.current < POLL_BUDGET_MS) {
-        timerRef.current = setTimeout(() => {
-          void pollRef.current(idToPoll);
-        }, backoff);
-      } else {
-        setIsPolling(false);
-        setTimeoutReached(true);
-      }
+  const startPollingCycle = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
     }
-  }, []);
 
-  useEffect(() => {
-    pollRef.current = runPolling;
-  }, [runPolling]);
-
-  useEffect(() => {
-    let ignore = false;
+    const generation = ++generationRef.current;
     startTimeRef.current = Date.now();
     transientRetriesRef.current = 0;
 
-    async function init() {
-      let activeId = ticketId;
+    async function execute() {
+      let targetId = activeTicketIdRef.current;
 
-      // If sessionStorage is empty, fall back to newest ticket from GET /api/tickets/me (P2-1)
-      if (!activeId) {
+      // If targetId is not known yet, check sessionStorage first
+      if (!targetId) {
+        try {
+          const stored = sessionStorage.getItem(PENDING_TICKET_KEY);
+          if (stored && Number(stored) > 0) {
+            targetId = Number(stored);
+          }
+        } catch {
+          // Storage parse error ignored
+        }
+      }
+
+      // If still not known, discover via recent tickets from /api/tickets/me (Issue 7)
+      if (!targetId) {
         try {
           const myTickets = await ticketsApi.getMyTickets(0, 1);
-          if (myTickets.content && myTickets.content.length > 0) {
-            activeId = myTickets.content[0].id;
-            setTicketId(activeId);
+          if (disposedRef.current || generation !== generationRef.current) return;
+
+          // Only adopt recent tickets (either PENDING_PAYMENT or within last 24h - do not adopt old historical tickets)
+          const now = Date.now();
+          const candidate = myTickets.content?.find((t) => {
+            if (t.status === 'PENDING_PAYMENT') return true;
+            const startTime = new Date(t.scheduleStartTime).getTime();
+            return startTime > now - 24 * 3600 * 1000;
+          });
+
+          if (candidate) {
+            targetId = candidate.id;
           } else {
-            if (!ignore) {
-              setIsPolling(false);
-              setError('No active booking reference found. If you completed payment, please check My tickets.');
-            }
+            setIsPolling(false);
+            setError(
+              'No active booking reference found. If you completed payment, please check My tickets.',
+            );
             return;
           }
         } catch {
-          if (!ignore) {
-            setIsPolling(false);
-            setError('Could not verify recent booking. Please check My tickets.');
-          }
+          if (disposedRef.current || generation !== generationRef.current) return;
+          setIsPolling(false);
+          setError(
+            'Could not verify recent booking. Please click "Check again" or visit My tickets.',
+          );
           return;
         }
       }
 
-      if (!ignore && activeId) {
-        void runPolling(activeId);
+      if (disposedRef.current || generation !== generationRef.current) return;
+      activeTicketIdRef.current = targetId;
+      setTicketId(targetId);
+
+      // Single poll step recursion guarded by generation and disposal (Issue 7)
+      async function pollStep() {
+        if (disposedRef.current || generation !== generationRef.current || !targetId) return;
+
+        try {
+          const currentTicket = await ticketsApi.getTicket(targetId);
+          if (disposedRef.current || generation !== generationRef.current) return;
+
+          setTicket(currentTicket);
+
+          // Handle terminal statuses explicitly (Issue 7)
+          if (currentTicket.status !== 'PENDING_PAYMENT') {
+            setIsPolling(false);
+            // Clear sessionStorage ONLY if it refers to THIS ticket being resolved (Issue 7)
+            try {
+              const currentPending = sessionStorage.getItem(PENDING_TICKET_KEY);
+              if (currentPending && Number(currentPending) === targetId) {
+                sessionStorage.removeItem(PENDING_TICKET_KEY);
+              }
+            } catch {
+              // Ignore
+            }
+            return;
+          }
+
+          // Check poll budget (~60s)
+          if (Date.now() - startTimeRef.current >= POLL_BUDGET_MS) {
+            setIsPolling(false);
+            setTimeoutReached(true);
+            return;
+          }
+
+          timerRef.current = setTimeout(() => {
+            void pollStep();
+          }, 1000);
+        } catch (err) {
+          if (disposedRef.current || generation !== generationRef.current) return;
+
+          if (err instanceof ApiException) {
+            if (err.status === 401 || err.status === 403) {
+              setIsPolling(false);
+              setError('Session expired or access denied. Please sign in to view your tickets.');
+              return;
+            }
+            if (err.status === 404) {
+              setIsPolling(false);
+              setError('Ticket not found. Please check My tickets for your booking history.');
+              return;
+            }
+          }
+
+          transientRetriesRef.current += 1;
+          const backoff = Math.min(1000 * Math.pow(1.4, transientRetriesRef.current), 4000);
+
+          if (Date.now() + backoff - startTimeRef.current < POLL_BUDGET_MS) {
+            timerRef.current = setTimeout(() => {
+              void pollStep();
+            }, backoff);
+          } else {
+            setIsPolling(false);
+            setTimeoutReached(true);
+          }
+        }
       }
+
+      void pollStep();
     }
 
-    void init();
+    void execute();
+  }, []);
+
+  useEffect(() => {
+    disposedRef.current = false;
+    startPollingCycle();
 
     return () => {
-      ignore = true;
-      if (timerRef.current) clearTimeout(timerRef.current);
+      disposedRef.current = true;
+      generationRef.current += 1;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
     };
-  }, [ticketId, runPolling]);
+  }, [startPollingCycle]);
 
-  // "Check again" restarts polling with fresh budget (P2-1)
+  // "Check again" restarts discovery as well as polling with a fresh budget (Issue 7)
   const handleCheckAgain = () => {
-    if (!ticketId) return;
-    startTimeRef.current = Date.now();
-    transientRetriesRef.current = 0;
-    setTimeoutReached(false);
     setError(null);
+    setTimeoutReached(false);
     setIsPolling(true);
-    void runPolling(ticketId);
+    startPollingCycle();
   };
 
   const seatsString = ticket?.seats.map((s) => `${s.rowLabel}${s.seatNumber}`).join(' · ') || '';
