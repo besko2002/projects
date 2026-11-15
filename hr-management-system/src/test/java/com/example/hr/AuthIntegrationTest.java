@@ -220,7 +220,7 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
 
         getAs(old, "/api/employees/me")
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.message").value("This token was issued before the last password change"));
+                .andExpect(jsonPath("$.message").value("Your account credentials or permissions changed; please sign in again"));
         getAs(login(staff.email(), "Rotated@2025"), "/api/employees/me").andExpect(status().isOk());
     }
 
@@ -256,7 +256,7 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
             getAs(old, "/api/employees/me")
                     .andExpect(status().isUnauthorized())
                     .andExpect(jsonPath("$.message")
-                            .value("This token was issued before the last password change"));
+                            .value("Your account credentials or permissions changed; please sign in again"));
             // The token handed out by the change itself works.
             getAs(login(staff.email(), "Rotated@2025"), "/api/employees/me").andExpect(status().isOk());
             return;
@@ -296,7 +296,7 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
         getAs(before, "/api/employees/me")
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message")
-                        .value("This token was issued before the last password change"));
+                        .value("Your account credentials or permissions changed; please sign in again"));
         // A fresh login carries the same version as the one the change handed out.
         assertThat(tokenVersionOf(login(staff.email(), "Rotated@2025"))).isEqualTo(storedAfter);
     }

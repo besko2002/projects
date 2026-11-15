@@ -113,6 +113,9 @@ docker compose --env-file .env.local --profile app down
   must change that password on first login.
 - Security: while `mustChangePassword` is set, every endpoint except `POST /api/auth/change-password` and
   `GET /api/employees/me` answers 403. Changing a password invalidates all tokens issued before it.
+  Changing a role also increments the token version: old tokens receive 401 with an explicit
+  “please sign in again” message. After signing in, promoted employees can use HR password reset;
+  demoted employees cannot. Saving the same role does not revoke a session.
   Failed logins are throttled in memory per e-mail + client IP (`LOGIN_MAX_FAILURES`, default 5, within
   `LOGIN_FAILURE_WINDOW`, default 15 min) with 429. Behind the nginx proxy the real client IP is used
   (`X-Forwarded-For`, trusted only from private-network proxies), so one visitor cannot lock another out.

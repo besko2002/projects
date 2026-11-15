@@ -18,6 +18,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** Independent request transactions must serialize on the employee even when no session exists yet. */
@@ -27,6 +28,14 @@ class AttendanceWriteConcurrencyIntegrationTest extends AbstractAttendanceIntegr
     private String hrToken;
     private String staffToken;
     private NewEmployee staff;
+
+    @Test
+    void employeeLockRequiresAnExistingTransaction() {
+        assertThatThrownBy(() -> sessions.lockEmployee(staff.id()))
+                .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException.class);
+        new TransactionTemplate(transactionManager).executeWithoutResult(transaction ->
+                assertThat(sessions.lockEmployee(staff.id())).isPresent());
+    }
 
     @BeforeEach
     void fixtures() throws Exception {

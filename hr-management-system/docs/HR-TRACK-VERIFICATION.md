@@ -18,3 +18,12 @@
 - `python3 /Users/god_fatheer/.hermes/cache/scratch/hr-track-run.py h2-backend`: 634 tests, zero failures/errors/skips. `npm test -- --run`: 229 passed.
 - Evidence: scratch `hr-h2-focus-red.log`, `hr-lock-red.log`, `hr-lock-green.log`, `hr-mapping-red.log`, `hr-h2-backend.log`, `hr-h2-frontend.log`. Real native PostgreSQL for concurrency; MVC/HTTP in-process, synthetic SQL exception for mapping; jsdom/fetch doubles for focus.
 - Harness correction: restored source timestamps initially let Maven reuse mutated bytecode. The runner now removes isolated classes/test-classes/maven-status before every run; clean recompilation is green. This initial failed green attempt is retained in the execution history, not counted as an application regression.
+
+## H3 — role/session coherence and transaction requirement
+
+- Chosen policy: changing an employee's role revokes previous JWTs (increment `token_version` only on a real change); the next request returns 401 with an explicit sign-in instruction. Fresh login receives the new role. No-op role changes preserve sessions. README documents this choice.
+- Two parameterized API regressions (promotion and demotion) fail before implementation, then pass; they check no-op preservation, version bump, old-token reset rejection and fresh-token reset permission.
+- Repository lock now requires `Propagation.MANDATORY`. New integration test first fails because autocommit silently succeeds; after the guard, outside-transaction use throws and inside-transaction use succeeds.
+- `python3 /Users/god_fatheer/.hermes/cache/scratch/hr-track-run.py h3-backend-final`: 637 tests, zero failures/errors/skips (Redis excluded), real native PostgreSQL, in-process MVC.
+- The first full run correctly caught three existing tests asserting the former password-only message. Updated only their message expectations; all three fail against the historical message mutation and pass against the new generic credential/permission message. Existing token-revocation assertions retained.
+- Evidence: scratch `hr-h3-role-red.log`, `hr-h3-role-green.log`, `hr-h3-transaction-red.log`, `hr-message-red.log`, `hr-h3-backend-final.log`. No schema changes or saved-data access.

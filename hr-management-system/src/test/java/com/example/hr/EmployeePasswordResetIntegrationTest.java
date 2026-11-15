@@ -2,6 +2,8 @@ package com.example.hr;
 
 import com.example.hr.employee.Role;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
@@ -10,9 +12,35 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class EmployeePasswordResetIntegrationTest extends AbstractIntegrationTest {
+    @ParameterizedTest
+    @EnumSource(value = Role.class, names = {"EMPLOYEE", "HR"})
+    void roleChangesRevokeOldTokensAndFreshLoginUsesNewPermissions(Role initial) throws Exception {
+        String admin = adminToken();
+        NewEmployee actor = createEmployee(admin, "Role Changed Actor", initial, null);
+        NewEmployee target = createEmployee(admin, "Role Changed Target", Role.EMPLOYEE, null);
+        String old = login(actor.email(), actor.password());
+        int before = jdbc.queryForObject("select token_version from employees where id = ?", Integer.class, actor.id());
+        // A no-op role edit must not log the user out.
+        mvc.perform(patch("/api/employees/" + actor.id()).header("Authorization", bearer(admin))
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("role", initial.name()))))
+                .andExpect(status().isOk());
+        getAs(old, "/api/employees/me").andExpect(status().isOk());
+        Role changed = initial == Role.EMPLOYEE ? Role.HR : Role.EMPLOYEE;
+        mvc.perform(patch("/api/employees/" + actor.id()).header("Authorization", bearer(admin))
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("role", changed.name()))))
+                .andExpect(status().isOk());
+        reset(old, target.id(), "Verified identity").andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Your account credentials or permissions changed; please sign in again"));
+        assertThat(jdbc.queryForObject("select token_version from employees where id = ?", Integer.class, actor.id()))
+                .isEqualTo(before + 1);
+        reset(login(actor.email(), actor.password()), target.id(), "Verified identity")
+                .andExpect(initial == Role.EMPLOYEE ? status().isOk() : status().isForbidden());
+    }
+
     private ResultActions reset(String token, UUID id, String reason) throws Exception {
         return mvc.perform(post("/api/employees/" + id + "/reset-password")
                 .header("Authorization", bearer(token)).contentType(MediaType.APPLICATION_JSON)

@@ -65,11 +65,11 @@ public class ActiveEmployeeFilter extends OncePerRequestFilter {
                 reject(request, response, HttpStatus.UNAUTHORIZED, "This account is no longer active");
                 return;
             }
-            // The version is the decisive check: it changes on every password change, so a
+            // The version is the decisive check: it changes on every password or role change, so a
             // token minted in the same second as the change is rejected as well.
             if (tokenVersion(token.getToken()) != state.get().getTokenVersion()) {
                 reject(request, response, HttpStatus.UNAUTHORIZED,
-                        "This token was issued before the last password change");
+                        "Your account credentials or permissions changed; please sign in again");
                 return;
             }
             // Secondary, coarse signal kept as a second line of defence: the timestamp has

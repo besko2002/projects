@@ -96,7 +96,7 @@ public class Employee {
     private Instant passwordChangedAt;
 
     /**
-     * Bumped on every password change and carried in the JWT. This is the reliable revocation
+     * Bumped on every password or role change and carried in the JWT. This is the reliable revocation
      * signal: {@link #passwordChangedAt} only has second resolution (the JWT {@code iat} has
      * none finer), so a token minted in the same second as a password change would survive a
      * timestamp comparison - the version cannot, because it changes on every password change
@@ -178,7 +178,10 @@ public class Employee {
     }
 
     public void changeRole(Role role) {
-        this.role = role;
+        if (this.role != role) {
+            this.role = role;
+            this.tokenVersion++;
+        }
     }
 
     public void changeHireDate(LocalDate hireDate) {
@@ -206,7 +209,7 @@ public class Employee {
         this.mustChangePassword = true;
     }
 
-    /** The token version carried in the tokens of this employee; bumped on every password change. */
+    /** The token version carried in tokens; bumped on every password or role change. */
     public int getTokenVersion() {
         return tokenVersion;
     }

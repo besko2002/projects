@@ -1,11 +1,11 @@
 package com.example.hr.attendance;
 
 import com.example.hr.employee.Employee;
-import jakarta.persistence.LockModeType;
-import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -32,6 +32,7 @@ public interface AttendanceSessionRepository extends JpaRepository<AttendanceSes
                                            @Param("workDate") LocalDate workDate);
 
     /** All attendance writers take this database row lock before reading any sessions. */
+    @Transactional(propagation = Propagation.MANDATORY)
     @Query(value = "select * from employees where id = :employeeId for no key update", nativeQuery = true)
     Optional<Employee> lockEmployee(@Param("employeeId") UUID employeeId);
 
