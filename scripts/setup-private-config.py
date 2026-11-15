@@ -14,6 +14,7 @@ import getpass
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import time
 
@@ -29,16 +30,29 @@ def mask(value: str) -> str:
     return "******** (configured, hidden)"
 
 
+# Only a strictly shaped "scheme://host[:port]/database" prefix is ever shown. User info, query
+# parameters and anything else (where passwords live in every URL form: user:pw@, ?password=,
+# sslpassword=, ;password=, encoded names...) is never printed, not even partly.
+_DB_URL_PREFIX = re.compile(
+    r'^((?:jdbc:)?postgres(?:ql)?://)'
+    r'([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])'
+    r'(:[0-9]{1,5})?'
+    r'(/[A-Za-z0-9_-]+)?'
+    r'(?=$|[?#;])'
+)
+
+
 def mask_db_url(url: str) -> str:
     if not url:
         return "<not configured>"
-    import re
     s = str(url)
-    # Mask authority user:password@ where password may contain @ or special characters
-    s = re.sub(r'(://[^:/\s]+:)(.*)(@[^/\s]+)', r'\1****\3', s)
-    # Also mask query parameters like ?password=... or &password=... or pwd=
-    s = re.sub(r'([?&](?:password|pwd)=)[^&]*', r'\1****', s, flags=re.IGNORECASE)
-    return s
+    match = _DB_URL_PREFIX.match(s)
+    if not match:
+        return "<configured, hidden (contains credentials or an unrecognised form)>"
+    shown = match.group(0)
+    if len(s) > len(shown):
+        shown += " (parameters hidden)"
+    return shown
 
 
 def print_status(config: dict):

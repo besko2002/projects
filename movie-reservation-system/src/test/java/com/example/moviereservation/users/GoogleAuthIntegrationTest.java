@@ -32,7 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.google.client-id=test-google-client-id-12345.apps.googleusercontent.com"
 })
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, PasswordResetIntegrationTest.TestEmailConfig.class})
 class GoogleAuthIntegrationTest {
 
     private static final String CLIENT_ID = "test-google-client-id-12345.apps.googleusercontent.com";
@@ -50,6 +50,9 @@ class GoogleAuthIntegrationTest {
 
     @Autowired
     private GoogleTokenVerifierImpl googleTokenVerifier;
+
+    @Autowired
+    private PasswordResetIntegrationTest.CapturedEmailSender capturedEmails;
 
     @Autowired
     private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
@@ -161,6 +164,23 @@ class GoogleAuthIntegrationTest {
 
         User reloaded = userRepository.findById(initial.getId()).orElseThrow();
         assertThat(reloaded.getGoogleSub()).isEqualTo(sub);
+    }
+
+    @Test
+    void linkingAnAccountThatHadAPasswordEmailsTheOwnerAfterCommit() throws Exception {
+        String email = "notify-link-" + System.nanoTime() + "@cinema.test";
+        User initial = userRepository.saveAndFlush(new User("Notify Me", email, "hashed-pass", Role.USER));
+        capturedEmails.googleReplacedNotifications.clear();
+
+        mockMvc.perform(post("/api/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new GoogleAuthRequest(
+                                validToken("google-sub-notify-" + System.nanoTime(), email, "Notify Me")))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.notice").value(containsString("Forgot password")));
+
+        assertThat(capturedEmails.googleReplacedNotifications).containsExactly(email);
+        assertThat(userRepository.findById(initial.getId()).orElseThrow().getPasswordHash()).isNull();
     }
 
     @Test

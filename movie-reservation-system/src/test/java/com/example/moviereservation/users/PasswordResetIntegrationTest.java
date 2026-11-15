@@ -47,7 +47,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Import({TestcontainersConfiguration.class, PasswordResetIntegrationTest.TestEmailConfig.class})
 class PasswordResetIntegrationTest {
 
-    private static final String UNIFORM_MESSAGE = "If an account matches that email, a password reset link has been sent.";
+    private static final String UNIFORM_MESSAGE = "If an account matches that email, we will email a password reset link. It can take a few minutes; if nothing arrives, check your spam folder or request a new link.";
 
     @Autowired
     private MockMvc mockMvc;

@@ -155,7 +155,7 @@ public class PasswordResetService {
                     com.example.moviereservation.users.email.ResendEmailSender.maskEmail(email));
         }
 
-        return new MessageResponse("If an account matches that email, a password reset link has been sent.");
+        return new MessageResponse("If an account matches that email, we will email a password reset link. It can take a few minutes; if nothing arrives, check your spam folder or request a new link.");
     }
 
     /**
