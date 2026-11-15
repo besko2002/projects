@@ -27,3 +27,11 @@
 - `python3 /Users/god_fatheer/.hermes/cache/scratch/hr-track-run.py h3-backend-final`: 637 tests, zero failures/errors/skips (Redis excluded), real native PostgreSQL, in-process MVC.
 - The first full run correctly caught three existing tests asserting the former password-only message. Updated only their message expectations; all three fail against the historical message mutation and pass against the new generic credential/permission message. Existing token-revocation assertions retained.
 - Evidence: scratch `hr-h3-role-red.log`, `hr-h3-role-green.log`, `hr-h3-transaction-red.log`, `hr-message-red.log`, `hr-h3-backend-final.log`. No schema changes or saved-data access.
+
+## H4 — date-relative documentation fixtures
+
+- Attendance repair fixtures derive the selected month, real month end (including leap years), and a session date no later than today; totals match the single 480-minute session with zero overtime/late/absent days. Employee name now matches the selected employee.
+- `node --test scripts/capture-docs.test.mjs`: four calendar cases (January 1, leap February, November, December) failed against old fixtures (November hardcode/overtime mismatch), then all four passed. This test executes the capture script with a browser double and inspects actual intercepted response bodies; it does not render screenshots.
+- `node /Users/god_fatheer/.hermes/cache/scratch/hr-track-capture.mjs`: real Chromium + isolated Vite on 5186; all nine screenshots regenerated with fictional intercepted API data, zero capture errors/alerts. Only `hr-attendance-repair.png` changed bytes.
+- Visually inspected attendance repair and password recovery screenshots. Repair shows November 2026, November 10 session 07:00–15:00 UTC, 8h worked matching the row and zero absent/missing checkout days; no clipping. Password recovery panel remains legible and contains no credentials.
+- `npm test -- --run`: 229 passed; `npm run lint`, `git diff --check`: passed. Evidence: scratch `hr-h4-red.log`, `hr-h4-green.log`, `hr-h4-capture.log`, `hr-h4-frontend.log`. Live 8091/5175 untouched; isolated Vite closed in finally.

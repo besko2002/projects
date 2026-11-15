@@ -17,6 +17,9 @@ const { code } = await transform(fixturesSource, { loader: 'ts', format: 'esm' }
 const f = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 const today = new Date().toISOString().slice(0, 10);
 const year = Number(today.slice(0, 4));
+const month = today.slice(0, 7);
+const monthEnd = new Date(Date.UTC(year, Number(today.slice(5, 7)), 0)).toISOString().slice(0, 10);
+const sessionDay = `${month}-${String(Math.min(10, Number(today.slice(8, 10)))).padStart(2, '0')}`;
 const employee = f.makeEmployee({ fullName: 'Nadia Hassan', email: 'nadia@example.test' });
 const hr = f.makeEmployee({ id: 'emp-hr', employeeNumber: 'EMP-0004', fullName: 'Mona Hassan',
   email: 'mona@example.test', role: 'HR', jobTitle: 'People Partner', departmentId: 'dep-2', departmentName: 'People' });
@@ -69,22 +72,31 @@ async function capture(path, filename, role = null, revealLogin = false) {
       '/api/employees/emp-2/audit': f.makePage([]),
       '/api/attendance/employees/emp-2': f.makeAttendanceRange({
         employeeId: 'emp-2',
-        from: `${year}-11-01`,
-        to: `${year}-11-30`,
+        employeeName: staff[2].fullName,
+        from: `${month}-01`,
+        to: monthEnd,
+        workingDays: 1,
+        presentDays: 1,
+        lateDays: 0,
+        absentDays: 0,
+        workedMinutes: 480,
+        lateMinutes: 0,
+        overtimeMinutes: 0,
         days: [
           f.makeDay({
-            day: `${year}-11-10`,
+            day: sessionDay,
             status: 'PRESENT',
-            firstIn: `${year}-11-10T09:00:00`,
-            lastOut: `${year}-11-10T17:00:00`,
+            firstIn: `${sessionDay}T09:00:00`,
+            lastOut: `${sessionDay}T17:00:00`,
             workedMinutes: 480,
+            overtimeMinutes: 0,
             sessions: [
               {
                 id: 'sess-1',
                 employeeId: 'emp-2',
-                workDate: `${year}-11-10`,
-                checkIn: `${year}-11-10T07:00:00.000Z`,
-                checkOut: `${year}-11-10T15:00:00.000Z`,
+                workDate: sessionDay,
+                checkIn: `${sessionDay}T07:00:00.000Z`,
+                checkOut: `${sessionDay}T15:00:00.000Z`,
                 localCheckIn: '09:00',
                 localCheckOut: '17:00',
                 minutes: 480,
