@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import type { UserDto } from '../types/auth';
 import type { LoginPayload, RegisterPayload } from '../api/authApi';
 import * as authApi from '../api/authApi';
-import { getToken, setToken, setUnauthorizedHandler } from '../api/client';
+import { ApiException, getToken, setToken, setUnauthorizedHandler } from '../api/client';
 import { AuthContext } from './useAuth';
 
 export function AuthProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
@@ -19,10 +19,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     try {
       const me = await authApi.getMe();
       setUser(me);
-    } catch {
-      setUser(null);
-      setToken(null);
-      setTokenState(null);
+    } catch (err) {
+      if (err instanceof ApiException && (err.status === 401 || err.status === 403)) {
+        setUser(null);
+        setToken(null);
+        setTokenState(null);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -44,11 +46,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
             setIsLoading(false);
           }
         })
-        .catch(() => {
+        .catch((err) => {
           if (!ignore) {
-            setUser(null);
-            setToken(null);
-            setTokenState(null);
+            // Only clear token & session on 401/403, preserve on network or 5xx server errors
+            if (err instanceof ApiException && (err.status === 401 || err.status === 403)) {
+              setUser(null);
+              setToken(null);
+              setTokenState(null);
+            }
             setIsLoading(false);
           }
         });
@@ -74,6 +79,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const handleLogout = async () => {
     try {
       await authApi.logout();
+    } catch {
+      // Gracefully catch logout errors (P3)
     } finally {
       setUser(null);
       setToken(null);

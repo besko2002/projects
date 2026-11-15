@@ -66,9 +66,11 @@ export async function request<T>(
   });
 
   if (response.status === 401) {
-    setToken(null);
-    if (unauthorizedHandler) {
-      unauthorizedHandler();
+    if (token === getToken()) {
+      setToken(null);
+      if (unauthorizedHandler) {
+        unauthorizedHandler();
+      }
     }
   }
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { TopBar } from '../components/TopBar';
 import { DateSelector } from '../components/DateSelector';
 import { GenreChips } from '../components/GenreChips';
@@ -8,57 +8,89 @@ import type { GenreDto, MovieSummary } from '../types/movie';
 import type { ScheduleSummary } from '../types/schedule';
 import * as moviesApi from '../api/moviesApi';
 import * as schedulesApi from '../api/schedulesApi';
-import { formatDuration, getUpcomingDays } from '../utils/dateUtils';
-import { getPosterGradient } from '../utils/posterUtils';
+import { formatDuration, formatTime, getUpcomingDays } from '../utils/dateUtils';
+import { formatMoney } from '../utils/moneyUtils';
 
 export function HomePage(): React.JSX.Element {
+  const [searchParams] = useSearchParams();
   const days = useMemo(() => getUpcomingDays(7), []);
   const [selectedDate, setSelectedDate] = useState<string>(days[0]?.dateString ?? '');
   const [genres, setGenres] = useState<GenreDto[]>([]);
   const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>(() => searchParams.get('q') || '');
+  const [referenceTime] = useState<number>(() => Date.now());
 
   const [movies, setMovies] = useState<MovieSummary[]>([]);
   const [schedules, setSchedules] = useState<ScheduleSummary[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const [catalogueError, setCatalogueError] = useState<string | null>(null);
+  const [schedulesError, setSchedulesError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadInitial() {
-      try {
-        const [genresData, moviesData] = await Promise.all([
-          moviesApi.getGenres(),
-          moviesApi.getMovies({ size: 100 }),
-        ]);
-        setGenres(genresData);
-        setMovies(moviesData.content);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load catalogue');
-      }
-    }
-    void loadInitial();
-  }, []);
+  const handleSelectGenre = (genre: string | null) => {
+    setSelectedGenre(genre);
+    setLoading(true);
+  };
 
+  // Load genres and movies with ignore flag and genre filter (P2-3, P2-4)
   useEffect(() => {
-    async function loadSchedules() {
-      if (!selectedDate) return;
-      try {
-        setLoading(true);
-        const data = await schedulesApi.getSchedules({
-          date: selectedDate,
-          size: 100,
-        });
-        setSchedules(data.content);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load showtimes');
-      } finally {
-        setLoading(false);
-      }
-    }
-    void loadSchedules();
+    let ignore = false;
+    Promise.all([
+      moviesApi.getGenres(),
+      moviesApi.getMovies({ genre: selectedGenre ?? undefined, size: 100 }),
+    ])
+      .then(([genresData, moviesData]) => {
+        if (!ignore) {
+          setGenres(genresData);
+          setMovies(moviesData.content);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!ignore) {
+          setCatalogueError(err instanceof Error ? err.message : 'Failed to load movie catalogue');
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [selectedGenre]);
+
+  // Load schedules using local day bounds (P2-2, P2-3)
+  useEffect(() => {
+    let ignore = false;
+    if (!selectedDate) return;
+
+    // Compute user's local midnight start and next midnight end
+    const [y, m, d] = selectedDate.split('-').map(Number);
+    const localStart = new Date(y, m - 1, d, 0, 0, 0, 0);
+    const localEnd = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+
+    schedulesApi
+      .getSchedules({
+        from: localStart.toISOString(),
+        to: localEnd.toISOString(),
+        size: 100,
+      })
+      .then((data) => {
+        if (!ignore) {
+          setSchedules(data.content);
+          setSchedulesError(null);
+        }
+      })
+      .catch((err) => {
+        if (!ignore) {
+          setSchedulesError(err instanceof Error ? err.message : 'Failed to load showtimes');
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
   }, [selectedDate]);
 
-  // Map schedules by movieId
+  // Map schedules by movieId (filtering out already-started shows for booking - P2-2)
   const schedulesByMovie = useMemo(() => {
     const map = new Map<number, ScheduleSummary[]>();
     for (const s of schedules) {
@@ -69,7 +101,7 @@ export function HomePage(): React.JSX.Element {
     return map;
   }, [schedules]);
 
-  // Filter movies
+  // Client-side search filtering (backend already filtered by genre)
   const filteredMovies = useMemo(() => {
     return movies.filter((m) => {
       if (searchQuery.trim()) {
@@ -82,113 +114,137 @@ export function HomePage(): React.JSX.Element {
     });
   }, [movies, searchQuery]);
 
-  // Featured movie (first movie or Ember Road if present)
+  // Featured banner movie: prioritize first active movie
   const featuredMovie = useMemo(() => {
     return filteredMovies[0] || movies[0] || null;
   }, [filteredMovies, movies]);
 
   const featuredSchedules = useMemo(() => {
     if (!featuredMovie) return [];
-    return schedulesByMovie.get(featuredMovie.id) || [];
-  }, [featuredMovie, schedulesByMovie]);
+    const list = schedulesByMovie.get(featuredMovie.id) || [];
+    // Prioritize upcoming showtimes
+    return list.filter((s) => new Date(s.startTime).getTime() > referenceTime);
+  }, [featuredMovie, schedulesByMovie, referenceTime]);
+
+  const nextFeaturedShowtime = featuredSchedules[0] || null;
+
+  const [todayLabel] = useState<string>(() => {
+    const now = new Date();
+    return now.toLocaleDateString('en-US', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    });
+  });
 
   return (
-    <div className="screen-container">
+    <div className="screen screen-container" id="home">
       <TopBar searchQuery={searchQuery} onSearchChange={setSearchQuery} />
 
       <main className="wrap">
-        {error && (
-          <div className="error-banner" style={{ marginBottom: 'var(--space-6)' }}>
-            {error}
+        <div className="kicker">{todayLabel}</div>
+        <h1>Now playing</h1>
+
+        {catalogueError && (
+          <div className="error-banner" role="alert" style={{ marginTop: 'var(--space-4)' }}>
+            {catalogueError}
           </div>
         )}
 
-        {/* Hero Section */}
+        {schedulesError && (
+          <div className="error-banner" role="alert" style={{ marginTop: 'var(--space-4)' }}>
+            {schedulesError}
+          </div>
+        )}
+
+        {/* Featured Letter-board Banner */}
         {featuredMovie && (
-          <section className="hero" aria-label="Featured Movie and Day Picker">
-            <div
-              className="feature poster"
-              style={{
-                background: featuredMovie.posterUrl
-                  ? `url(${featuredMovie.posterUrl})`
-                  : getPosterGradient(featuredMovie.title),
-              }}
-            >
-              <span className="badge b-pend" style={{ position: 'relative', zIndex: 2 }}>
-                FEATURED NOW SHOWING
-              </span>
-              <div className="ptitle">{featuredMovie.title}</div>
-              <p>
-                Browse showtimes and reserve premium cinema seats. Full refunds available
-                up to 2 hours before showtime. {formatDuration(featuredMovie.durationMinutes)}
-              </p>
-              <div style={{ display: 'flex', gap: 'var(--space-3)', position: 'relative', zIndex: 2 }}>
-                <Link to={`/movie/${featuredMovie.id}`} className="btn btn-primary">
-                  Book seats
-                </Link>
-                {featuredSchedules[0] && (
-                  <Link
-                    to={`/book/${featuredSchedules[0].id}`}
-                    className="btn btn-ghost"
-                  >
-                    Next showtime
-                  </Link>
+          <section className="feature" aria-label="Featured Movie">
+            <div className="art p1">
+              <b>{featuredMovie.title}</b>
+            </div>
+            <div className="body">
+              <div className="board" aria-label="Featured Showtime Details">
+                <span>TONIGHT</span>
+                {nextFeaturedShowtime && (
+                  <>
+                    <span>{formatTime(nextFeaturedShowtime.startTime)}</span>
+                    <span>{nextFeaturedShowtime.theaterName.toUpperCase()}</span>
+                  </>
                 )}
               </div>
-            </div>
-
-            <div>
-              <h2>Pick a day</h2>
-              <DateSelector
-                days={days}
-                selectedDate={selectedDate}
-                onSelectDate={setSelectedDate}
-              />
-
-              <h2 style={{ marginTop: 'var(--space-6)' }}>Genres</h2>
-              <GenreChips
-                genres={genres}
-                selectedGenre={selectedGenre}
-                onSelectGenre={setSelectedGenre}
-              />
+              <p className="soft">
+                Experience the latest cinema release with crystal clear projection and immersive sound.
+                <br />
+                {formatDuration(featuredMovie.durationMinutes)}
+                {selectedGenre && ` · ${selectedGenre}`}
+                {nextFeaturedShowtime &&
+                  ` · Standard ${formatMoney(nextFeaturedShowtime.basePrice)} · VIP ${formatMoney(nextFeaturedShowtime.vipPrice)}`}
+              </p>
+              <div className="acts">
+                {nextFeaturedShowtime ? (
+                  <Link to={`/book/${nextFeaturedShowtime.id}`} className="btn red">
+                    Book seats
+                  </Link>
+                ) : (
+                  <Link to={`/movie/${featuredMovie.id}`} className="btn red">
+                    Book seats
+                  </Link>
+                )}
+                <Link to={`/movie/${featuredMovie.id}`} className="btn">
+                  All showtimes
+                </Link>
+              </div>
             </div>
           </section>
         )}
 
-        {/* Section Header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginTop: 'var(--space-8)',
-            marginBottom: 'var(--space-4)',
-          }}
-        >
-          <h2>Now showing</h2>
-          <span className="muted" style={{ fontSize: '14px' }}>
-            {filteredMovies.length} movie(s) · {schedules.length} showtime(s)
-          </span>
+        {/* Controls: Segmented Day Picker + Genre Pills on one row */}
+        <div className="controls">
+          <DateSelector
+            days={days}
+            selectedDate={selectedDate}
+            onSelectDate={setSelectedDate}
+          />
+          <GenreChips
+            genres={genres}
+            selectedGenre={selectedGenre}
+            onSelectGenre={handleSelectGenre}
+          />
         </div>
 
-        {/* Movies Grid */}
-        {loading && movies.length === 0 ? (
-          <div className="grid-movies">
-            {[1, 2, 3, 4, 5, 6].map((k) => (
-              <div key={k} className="skeleton" style={{ height: '340px' }} />
-            ))}
+        {/* 4-Column Ticket Cards Grid */}
+        {loading ? (
+          <div className="grid" aria-label="Loading movies">
+            <div className="ticket skeleton" style={{ height: '380px' }} />
+            <div className="ticket skeleton" style={{ height: '380px' }} />
+            <div className="ticket skeleton" style={{ height: '380px' }} />
+            <div className="ticket skeleton" style={{ height: '380px' }} />
           </div>
         ) : filteredMovies.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 'var(--space-12) 0', color: 'var(--ink-soft)' }}>
-            No movies match your criteria.
+          <div
+            style={{
+              padding: 'var(--space-12) var(--space-6)',
+              textAlign: 'center',
+              border: '3px solid var(--ink)',
+              background: 'var(--paper)',
+              boxShadow: 'var(--shadow)',
+              marginTop: 'var(--space-8)',
+            }}
+          >
+            <h2>No movies match your selection</h2>
+            <p className="soft" style={{ marginTop: 'var(--space-2)' }}>
+              Try selecting a different genre or date from the controls above.
+            </p>
           </div>
         ) : (
-          <div className="grid-movies">
-            {filteredMovies.map((movie) => (
+          <div className="grid" aria-label="Movies now playing">
+            {filteredMovies.map((m) => (
               <MovieCard
-                key={movie.id}
-                movie={movie}
-                schedules={schedulesByMovie.get(movie.id) || []}
+                key={m.id}
+                movie={m}
+                schedules={schedulesByMovie.get(m.id) || []}
+                genresLabel={selectedGenre || undefined}
               />
             ))}
           </div>

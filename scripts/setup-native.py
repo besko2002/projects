@@ -95,7 +95,7 @@ def main():
             if name == 'movies':
                 env.setdefault('ADMIN_EMAIL', 'admin@cinema.local')
                 env.setdefault('ADMIN_PASSWORD', secrets.token_urlsafe(24))
-                env['APP_BASE_URL'] = f'http://localhost:{port}'
+                env['APP_BASE_URL'] = 'http://localhost:5177'
             with config_path.open('x') as file:
                 json.dump(env, file, indent=2)
                 file.write('\n')
