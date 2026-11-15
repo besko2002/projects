@@ -64,8 +64,19 @@ public class AuthRateLimiter {
         increment("register:" + ip, registrations, true);
     }
 
-    public void demoSession(String ip, int limit) {
-        increment("demo:" + ip, limit, true);
+    public void googleAuth(String ip) {
+        increment("google:" + ip, 30, true);
+    }
+
+    public void forgotPassword(String ip, String email) {
+        increment("forgot-ip:" + ip, 15, true);
+        if (email != null && !email.isBlank()) {
+            increment("forgot-email:" + normalise(email), 5, true);
+        }
+    }
+
+    public void resetPassword(String ip) {
+        increment("reset:" + ip, 10, true);
     }
 
     private void increment(String key, int limit, boolean rejectBeforeIncrement) {
@@ -77,9 +88,16 @@ public class AuthRateLimiter {
             return new Window(old.startedAt, Math.min(old.count + 1, limit + 1));
         });
         if (rejectBeforeIncrement && state.count > limit) {
-            String message = key.startsWith("demo:")
-                    ? "Too many demo sessions created; please wait a moment and try again"
-                    : "Too many registration attempts; try again later";
+            String message;
+            if (key.startsWith("google:")) {
+                message = "Too many Google sign-in attempts; try again later";
+            } else if (key.startsWith("forgot-")) {
+                message = "Too many password reset requests; try again later";
+            } else if (key.startsWith("reset:")) {
+                message = "Too many password reset attempts; try again later";
+            } else {
+                message = "Too many registration attempts; try again later";
+            }
             throw new TooManyRequestsException(message);
         }
         // Expired keys are pruned periodically so arbitrary email probes cannot grow this map forever.

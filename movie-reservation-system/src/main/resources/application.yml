@@ -74,9 +74,12 @@ app:
     email: ${ADMIN_EMAIL:admin@cinema.local}
     password: ${ADMIN_PASSWORD:Admin@12345}
     name: ${ADMIN_NAME:System Admin}
-  demo:
-    enabled: ${DEMO_MODE_ENABLED:false}
-    rate-limit-per-minute: ${DEMO_RATE_LIMIT_PER_MINUTE:15}
+  google:
+    client-id: ${GOOGLE_CLIENT_ID:}
+  email:
+    resend-api-key: ${RESEND_API_KEY:}
+    mail-from: ${MAIL_FROM:noreply@cinebook.local}
+    frontend-base-url: ${FRONTEND_BASE_URL:${app.base-url:http://localhost:8080}}
 
 management:
   endpoints:

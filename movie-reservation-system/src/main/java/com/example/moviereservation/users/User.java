@@ -27,8 +27,11 @@ public class User {
     @Column(name = "email", nullable = false, length = 255, unique = true)
     private String email;
 
-    @Column(name = "password_hash", nullable = false, length = 255)
+    @Column(name = "password_hash", length = 255)
     private String passwordHash;
+
+    @Column(name = "google_sub", length = 255, unique = true)
+    private String googleSub;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false, length = 20)
@@ -48,10 +51,15 @@ public class User {
     }
 
     public User(String name, String email, String passwordHash, Role role) {
+        this(name, email, passwordHash, role, null);
+    }
+
+    public User(String name, String email, String passwordHash, Role role, String googleSub) {
         this.name = name;
         this.email = email;
         this.passwordHash = passwordHash;
         this.role = role;
+        this.googleSub = googleSub;
     }
 
     @PrePersist
@@ -107,6 +115,14 @@ public class User {
 
     public boolean isEnabled() {
         return enabled;
+    }
+
+    public String getGoogleSub() {
+        return googleSub;
+    }
+
+    public void setGoogleSub(String googleSub) {
+        this.googleSub = googleSub;
     }
 
     public void revokeTokens() {

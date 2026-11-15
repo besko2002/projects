@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type { UserDto } from '../types/auth';
-import type { DemoStatus } from '../types/demo';
 import type { LoginPayload, RegisterPayload } from '../api/authApi';
 import * as authApi from '../api/authApi';
 import { ApiException, getToken, setToken, setUnauthorizedHandler } from '../api/client';
@@ -10,7 +9,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const [user, setUser] = useState<UserDto | null>(null);
   const [token, setTokenState] = useState<string | null>(getToken());
   const [isLoading, setIsLoading] = useState<boolean>(() => !!getToken());
-  const [demoStatus, setDemoStatus] = useState<DemoStatus | null>(null);
 
   const refreshUser = useCallback(async () => {
     const requestToken = getToken();
@@ -31,7 +29,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       if (getToken() !== requestToken && getToken() !== null) {
         return;
       }
-      // An old bootstrap/refresh response must not erase a newer login (Issue 8)
+      // An old bootstrap/refresh response must not erase a newer login
       if (err instanceof ApiException && (err.status === 401 || err.status === 403)) {
         setUser(null);
         setToken(null);
@@ -71,7 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
             return;
           }
 
-          // Only clear token & session on 401/403 for the matching token (Issue 8)
+          // Only clear token & session on 401/403 for the matching token
           if (err instanceof ApiException && (err.status === 401 || err.status === 403)) {
             setUser(null);
             setToken(null);
@@ -79,21 +77,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
           }
           // Preserve user/token on network or 5xx server errors, but ALWAYS finish loading
           setIsLoading(false);
-        });
-    }
-
-    const statusPromise = authApi.getDemoStatus?.();
-    if (statusPromise && typeof statusPromise.then === 'function') {
-      statusPromise
-        .then((status) => {
-          if (!ignore && status) {
-            setDemoStatus(status);
-          }
-        })
-        .catch(() => {
-          if (!ignore) {
-            setDemoStatus({ enabled: false, banner: null, stripeMode: null });
-          }
         });
     }
 
@@ -124,10 +107,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     }
   };
 
-  const handleLoginDemo = async () => {
+  const handleLoginWithGoogle = async (idToken: string) => {
     setIsLoading(true);
     try {
-      const res = await authApi.createDemoSession();
+      const res = await authApi.loginWithGoogle({ idToken });
       setTokenState(res.accessToken);
       setUser(res.user);
     } finally {
@@ -139,7 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     try {
       await authApi.logout();
     } catch {
-      // Gracefully catch logout errors (P3)
+      // Gracefully catch logout errors
     } finally {
       setUser(null);
       setToken(null);
@@ -154,10 +137,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
         user,
         token,
         isLoading,
-        demoStatus,
         login: handleLogin,
         register: handleRegister,
-        loginDemo: handleLoginDemo,
+        loginWithGoogle: handleLoginWithGoogle,
         logout: handleLogout,
         refreshUser,
       }}

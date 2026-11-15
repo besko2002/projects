@@ -4,6 +4,7 @@ import com.example.moviereservation.common.BadRequestException;
 import com.example.moviereservation.common.ConflictException;
 import com.example.moviereservation.common.ResourceNotFoundException;
 import com.example.moviereservation.security.JwtService;
+import com.example.moviereservation.users.google.GoogleTokenPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -72,15 +73,66 @@ public class UserService {
     @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest request) {
         Optional<User> user = userRepository.findByEmail(normaliseEmail(request.email()));
-        // Always run one BCrypt comparison, even for an unknown email, so response time does not
-        // reveal which emails are registered.
-        String hash = user.map(User::getPasswordHash).orElse(dummyPasswordHash);
+        // Always run one BCrypt comparison, even for an unknown email or passwordless user,
+        // so response time does not reveal which emails are registered.
+        String hash = user.map(User::getPasswordHash).filter(h -> h != null && !h.isBlank()).orElse(dummyPasswordHash);
         boolean passwordMatches = !exceedsBcryptLimit(request.password())
                 && passwordEncoder.matches(request.password(), hash);
-        if (user.isEmpty() || !passwordMatches || !user.get().isEnabled()) {
+        if (user.isEmpty() || user.get().getPasswordHash() == null || !passwordMatches || !user.get().isEnabled()) {
             throw new BadCredentialsException(INVALID_CREDENTIALS);
         }
         return issueToken(user.get());
+    }
+
+    /**
+     * Authenticates a user using verified Google ID token claims.
+     * Links by email if an account already exists; otherwise registers a new account with {@link Role#USER}.
+     * Never grants administrator privileges via Google.
+     */
+    @Transactional
+    public AuthResponse authenticateWithGoogle(GoogleTokenPayload payload) {
+        if (payload.sub() == null || payload.sub().isBlank()) {
+            throw new BadRequestException("Google subject ID is required");
+        }
+        String email = normaliseEmail(payload.email());
+
+        // 1. Check if user with this google_sub already exists
+        Optional<User> userBySub = userRepository.findByGoogleSub(payload.sub());
+        User user;
+        if (userBySub.isPresent()) {
+            user = userBySub.get();
+        } else {
+            // 2. Check if user with this verified email already exists
+            Optional<User> userByEmail = userRepository.findByEmail(email);
+            if (userByEmail.isPresent()) {
+                user = userByEmail.get();
+                // Ensure the account is not already linked to a different Google subject ID
+                if (user.getGoogleSub() != null && !user.getGoogleSub().equals(payload.sub())) {
+                    throw new ConflictException("An account with this email is already linked to a different Google account");
+                }
+                user.setGoogleSub(payload.sub());
+                user = userRepository.saveAndFlush(user);
+                log.info("Linked existing user id={} to Google sub={}", user.getId(), payload.sub());
+            } else {
+                // 3. Create new user account with Role.USER (strictly never ADMIN)
+                String name = (payload.name() != null && !payload.name().isBlank())
+                        ? payload.name().trim()
+                        : email.split("@")[0];
+                user = new User(name, email, null, Role.USER, payload.sub());
+                try {
+                    user = userRepository.saveAndFlush(user);
+                } catch (DataIntegrityViolationException ex) {
+                    throw new ConflictException("Email is already registered");
+                }
+                log.info("Registered new user via Google id={} email={}", user.getId(), user.getEmail());
+            }
+        }
+
+        if (!user.isEnabled()) {
+            throw new BadCredentialsException("Account is disabled");
+        }
+
+        return issueToken(user);
     }
 
     /** @throws ResourceNotFoundException when no user has that id */
@@ -122,22 +174,6 @@ public class UserService {
         } catch (DataIntegrityViolationException ex) {
             return false;
         }
-    }
-
-    /**
-     * Creates an isolated temporary customer session for portfolio demo visitors.
-     * Always granted {@link Role#USER}; never granted administrator privileges.
-     */
-    @Transactional
-    public AuthResponse createDemoSession() {
-        String uuid = java.util.UUID.randomUUID().toString().substring(0, 8);
-        String email = "demo-" + uuid + "@demo.cinebook.local";
-        String name = "Demo Guest " + uuid.toUpperCase(Locale.ROOT);
-        String randomPassword = java.util.UUID.randomUUID().toString();
-        User user = new User(name, email, passwordEncoder.encode(randomPassword), Role.USER);
-        user = userRepository.saveAndFlush(user);
-        log.info("Created temporary demo session user id={} email={}", user.getId(), user.getEmail());
-        return issueToken(user);
     }
 
     private AuthResponse issueToken(User user) {

@@ -23,6 +23,10 @@ public class SecurityConfig {
             "/",
             "/login",
             "/register",
+            "/forgot-password",
+            "/reset-password",
+            "/admin",
+            "/admin/**",
             "/tickets",
             "/movie/**",
             "/book/**",
@@ -30,7 +34,7 @@ public class SecurityConfig {
             "/assets/**",
             "/favicon.ico",
             "/index.html",
-            "/api/demo/status",
+            "/api/auth/config",
             "/api/movies/**",
             "/api/genres/**",
             "/api/theaters/**",
@@ -40,7 +44,9 @@ public class SecurityConfig {
     private static final String[] PUBLIC_PATHS = {
             "/api/auth/login",
             "/api/auth/register",
-            "/api/demo/session",
+            "/api/auth/google",
+            "/api/auth/forgot-password",
+            "/api/auth/reset-password",
             "/payment/success",
             "/payment/cancel",
             "/actuator/health",
@@ -81,6 +87,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/payments/stripe/webhook").permitAll()
                         .requestMatchers(HttpMethod.GET, PUBLIC_GET_PATHS).permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        // Allow frontend SPA and static assets to be served on all non-API GET/HEAD requests (e.g. /foo)
+                        .requestMatchers(request -> ("GET".equalsIgnoreCase(request.getMethod())
+                                || "HEAD".equalsIgnoreCase(request.getMethod()))
+                                && !request.getRequestURI().startsWith("/api/")).permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(authenticationEntryPoint)

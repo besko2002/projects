@@ -4,21 +4,19 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 
 /**
- * Forwards SPA routes to index.html for client-side routing.
+ * Forwards frontend SPA routes to index.html for client-side routing.
  *
- * <p>API routes ({@code /api/**}), Swagger, Actuator and static assets are deliberately excluded,
- * ensuring unknown API routes answer with proper {@code ApiError} 404 responses instead of HTML.
+ * <p>API routes ({@code /api/**}), Stripe return routes ({@code /payment/**}), Swagger,
+ * Actuator, and static assets (containing extensions or under {@code /assets/**}, {@code /posters/**})
+ * are deliberately excluded so that unknown API routes return standard {@code ApiError} 404 JSON.
  */
 @Controller
 public class SpaWebController {
 
     @GetMapping(value = {
             "/",
-            "/login",
-            "/register",
-            "/tickets",
-            "/movie/{id}",
-            "/book/{id}"
+            "/{path:^(?!api|payment|actuator|v3|swagger-ui|posters|assets|favicon\\.ico)[^\\.]*}",
+            "/{path:^(?!api|payment|actuator|v3|swagger-ui|posters|assets|favicon\\.ico)[^\\.]*}/**"
     })
     public String forwardSpa() {
         return "forward:/index.html";
