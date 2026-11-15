@@ -198,20 +198,36 @@ export function AdminShowtimesPage(): React.JSX.Element {
     e.preventDefault();
     if (!bulkMovieId || !bulkTheaterId || !bulkStartDate || !bulkEndDate) return;
 
+    if (bulkStartDate > bulkEndDate) {
+      setError('End Date cannot be before Start Date.');
+      return;
+    }
+
     if (bulkVipPrice < bulkBasePrice) {
       setError('VIP ticket price cannot be lower than Base ticket price.');
       return;
     }
 
-    const times = bulkTimesInput
+    const rawTimes = bulkTimesInput
       .split(',')
       .map((t) => t.trim())
-      .filter((t) => /^\d{1,2}:\d{2}$/.test(t));
+      .filter(Boolean);
 
-    if (times.length === 0) {
-      setError('Please enter at least one valid time of day (e.g. "14:00, 17:30, 20:30").');
+    const timeRegex = /^(?:[01]?\d|2[0-3]):[0-5]\d$/;
+    const invalidTimes = rawTimes.filter((t) => !timeRegex.test(t));
+    if (invalidTimes.length > 0 || rawTimes.length === 0) {
+      setError(
+        invalidTimes.length > 0
+          ? `Invalid time format: "${invalidTimes.join(', ')}". Please enter valid 24-hour HH:mm times (00:00 to 23:59), e.g. "14:00, 17:30".`
+          : 'Please enter at least one valid time of day (e.g. "14:00, 17:30, 20:30").',
+      );
       return;
     }
+
+    const times = rawTimes.map((t) => {
+      const [h, m] = t.split(':');
+      return `${h.padStart(2, '0')}:${m}`;
+    });
 
     setIsBulkRunning(true);
     setError(null);
@@ -228,8 +244,10 @@ export function AdminShowtimesPage(): React.JSX.Element {
     const days = getDaysBetween(bulkStartDate, bulkEndDate);
     const totalSlots = days.length * times.length;
     let currentSlot = 0;
+    let sessionExpired = false;
 
     for (const day of days) {
+      if (sessionExpired) break;
       for (const time of times) {
         currentSlot++;
         const slotLabel = `${day} ${time}`;
@@ -261,7 +279,13 @@ export function AdminShowtimesPage(): React.JSX.Element {
             if (err.status === 409) {
               conflictCount++;
               results.push({ slot: slotLabel, status: 'conflict', reason: 'Auditorium occupied (time conflict)' });
-            } else if (err.status === 401 || err.status === 403) {
+            } else if (err.status === 401) {
+              errorCount++;
+              results.push({ slot: slotLabel, status: 'error', reason: `Permission error (${err.status}): ${err.message || 'Session expired'}` });
+              setError('Session expired (401). Please sign in again.');
+              sessionExpired = true;
+              break;
+            } else if (err.status === 403) {
               errorCount++;
               results.push({ slot: slotLabel, status: 'error', reason: `Permission error (${err.status}): ${err.message || 'Forbidden'}` });
             } else {

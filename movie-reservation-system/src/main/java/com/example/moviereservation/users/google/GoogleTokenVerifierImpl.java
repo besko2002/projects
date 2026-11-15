@@ -27,7 +27,6 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -49,7 +48,7 @@ public class GoogleTokenVerifierImpl implements GoogleTokenVerifier {
     private Function<String, PublicKey> keyProvider;
     private final AtomicReference<Map<String, PublicKey>> publicKeysRef = new AtomicReference<>(Map.of());
     private final AtomicLong certsCachedAt = new AtomicLong(0);
-    private final AtomicBoolean isRefreshing = new AtomicBoolean(false);
+    private final Object refreshLock = new Object();
 
     @org.springframework.beans.factory.annotation.Autowired
     public GoogleTokenVerifierImpl(@Value("${app.google.client-id:}") String clientId,
@@ -211,59 +210,62 @@ public class GoogleTokenVerifierImpl implements GoogleTokenVerifier {
             return currentKeys.get(kid);
         }
 
-        refreshGooglePublicKeys();
+        refreshGooglePublicKeys(kid);
         return publicKeysRef.get().get(kid);
     }
 
-    private void refreshGooglePublicKeys() {
+    private void refreshGooglePublicKeys(String kid) {
         long now = clock.millis();
-        if (now - certsCachedAt.get() < 60_000 && !publicKeysRef.get().isEmpty()) {
+        if (publicKeysRef.get().containsKey(kid) && (now - certsCachedAt.get() < 3600_000)) {
             return;
         }
 
-        // Concurrency guard: avoid multiple simultaneous HTTP fetches without blocking other threads
-        if (!isRefreshing.compareAndSet(false, true)) {
-            return;
-        }
-
-        try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(GOOGLE_CERTS_URL))
-                    .timeout(Duration.ofSeconds(5))
-                    .GET()
-                    .build();
-
-            HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                try (InputStream in = response.body()) {
-                    JsonNode root = objectMapper.readTree(in);
-                    JsonNode keys = root.path("keys");
-                    if (keys.isArray()) {
-                        Map<String, PublicKey> newKeys = new ConcurrentHashMap<>();
-                        KeyFactory keyFactory = KeyFactory.getInstance("RSA");
-                        for (JsonNode keyNode : keys) {
-                            String kid = keyNode.path("kid").asText();
-                            String nStr = keyNode.path("n").asText();
-                            String eStr = keyNode.path("e").asText();
-                            if (!kid.isEmpty() && !nStr.isEmpty() && !eStr.isEmpty()) {
-                                BigInteger modulus = new BigInteger(1, Base64.getUrlDecoder().decode(nStr));
-                                BigInteger exponent = new BigInteger(1, Base64.getUrlDecoder().decode(eStr));
-                                PublicKey key = keyFactory.generatePublic(new RSAPublicKeySpec(modulus, exponent));
-                                newKeys.put(kid, key);
-                            }
-                        }
-                        publicKeysRef.set(Map.copyOf(newKeys));
-                        certsCachedAt.set(now);
-                        log.info("Refreshed Google public certificates: {} keys cached", newKeys.size());
-                    }
-                }
-            } else {
-                log.warn("Failed to fetch Google public certs: status={}", response.statusCode());
+        synchronized (refreshLock) {
+            now = clock.millis();
+            if (publicKeysRef.get().containsKey(kid) && (now - certsCachedAt.get() < 3600_000)) {
+                return;
             }
-        } catch (Exception ex) {
-            log.warn("Failed to fetch Google public certs: {}", ex.getMessage());
-        } finally {
-            isRefreshing.set(false);
+            if (now - certsCachedAt.get() < 60_000 && !publicKeysRef.get().isEmpty()) {
+                return;
+            }
+
+            try {
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(GOOGLE_CERTS_URL))
+                        .timeout(Duration.ofSeconds(5))
+                        .GET()
+                        .build();
+
+                HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+                if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                    try (InputStream in = response.body()) {
+                        JsonNode root = objectMapper.readTree(in);
+                        JsonNode keys = root.path("keys");
+                        if (keys.isArray()) {
+                            Map<String, PublicKey> newKeys = new ConcurrentHashMap<>();
+                            KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+                            for (JsonNode keyNode : keys) {
+                                String k = keyNode.path("kid").asText();
+                                String nStr = keyNode.path("n").asText();
+                                String eStr = keyNode.path("e").asText();
+                                if (!k.isEmpty() && !nStr.isEmpty() && !eStr.isEmpty()) {
+                                    BigInteger modulus = new BigInteger(1, Base64.getUrlDecoder().decode(nStr));
+                                    BigInteger exponent = new BigInteger(1, Base64.getUrlDecoder().decode(eStr));
+                                    PublicKey key = keyFactory.generatePublic(new RSAPublicKeySpec(modulus, exponent));
+                                    newKeys.put(k, key);
+                                }
+                            }
+                            publicKeysRef.set(Map.copyOf(newKeys));
+                            certsCachedAt.set(now);
+                            log.info("Refreshed Google public certificates: {} keys cached", newKeys.size());
+                        }
+                    }
+                } else {
+                    log.warn("Failed to fetch Google public certs: status={}", response.statusCode());
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to fetch Google public certs: {}", ex.getMessage());
+            }
         }
     }
 }

@@ -633,7 +633,7 @@ input:focus-visible {
 
 .poster {
   aspect-ratio: 2 / 3;
-  min-height: 360px;
+  min-height: 0;
   height: auto;
   position: relative;
   overflow: hidden;
@@ -1290,7 +1290,8 @@ input:focus-visible {
   }
 
   .feature .art {
-    min-height: 120px;
+    min-height: 220px;
+    aspect-ratio: 16 / 9;
     border-right: none;
     border-bottom: var(--border-width) solid var(--ink);
   }

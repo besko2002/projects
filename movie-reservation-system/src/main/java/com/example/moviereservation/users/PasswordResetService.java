@@ -143,14 +143,16 @@ public class PasswordResetService {
                         }
                         log.info("Issued password reset token and dispatched email for user id={}", userId);
                     } catch (Exception ex) {
-                        log.error("Failed to send password reset email to {}: {}", toEmail, ex.getMessage());
+                        log.error("Failed to send password reset email to {}: {}",
+                                com.example.moviereservation.users.email.ResendEmailSender.maskEmail(toEmail), ex.getMessage());
                     }
                 });
             } else {
                 log.warn("Password reset requested for disabled user id={}", user.getId());
             }
         } else {
-            log.debug("Password reset requested for non-existent email {}", email);
+            log.debug("Password reset requested for non-existent email {}",
+                    com.example.moviereservation.users.email.ResendEmailSender.maskEmail(email));
         }
 
         return new MessageResponse("If an account matches that email, a password reset link has been sent.");
@@ -200,7 +202,8 @@ public class PasswordResetService {
             try {
                 emailSender.sendPasswordChangedNotification(toEmail);
             } catch (Exception ex) {
-                log.warn("Failed to dispatch password changed notification for {}: {}", toEmail, ex.getMessage());
+                log.warn("Failed to dispatch password changed notification for {}: {}",
+                        com.example.moviereservation.users.email.ResendEmailSender.maskEmail(toEmail), ex.getMessage());
             }
         });
 

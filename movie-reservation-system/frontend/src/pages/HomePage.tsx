@@ -11,6 +11,29 @@ import * as schedulesApi from '../api/schedulesApi';
 import { formatDuration, formatTime, getUpcomingDays } from '../utils/dateUtils';
 import { formatMoney } from '../utils/moneyUtils';
 
+function getFeaturedTimingBadge(showtime: ScheduleSummary | null): string {
+  if (!showtime) return 'NOW PLAYING';
+  const showDate = new Date(showtime.startTime);
+  const now = new Date();
+  const isSameDay =
+    showDate.getFullYear() === now.getFullYear() &&
+    showDate.getMonth() === now.getMonth() &&
+    showDate.getDate() === now.getDate();
+  if (isSameDay) {
+    return showDate.getHours() >= 17 ? 'TONIGHT' : 'TODAY';
+  }
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const isTomorrow =
+    showDate.getFullYear() === tomorrow.getFullYear() &&
+    showDate.getMonth() === tomorrow.getMonth() &&
+    showDate.getDate() === tomorrow.getDate();
+  if (isTomorrow) {
+    return 'TOMORROW';
+  }
+  return 'UPCOMING';
+}
+
 export function HomePage(): React.JSX.Element {
   const [searchParams] = useSearchParams();
   const days = useMemo(() => getUpcomingDays(7), []);
@@ -243,7 +266,7 @@ export function HomePage(): React.JSX.Element {
               style={
                 featuredMovie.posterUrl
                   ? {
-                      backgroundImage: `url("${featuredMovie.posterUrl}")`,
+                      backgroundImage: `url("${encodeURI(featuredMovie.posterUrl)}")`,
                       backgroundSize: 'cover',
                       backgroundPosition: 'center',
                     }
@@ -254,7 +277,7 @@ export function HomePage(): React.JSX.Element {
             </div>
             <div className="body">
               <div className="board" aria-label="Featured Showtime Details">
-                <span>{nextFeaturedShowtime ? 'TONIGHT' : 'NOW PLAYING'}</span>
+                <span>{getFeaturedTimingBadge(nextFeaturedShowtime)}</span>
                 {nextFeaturedShowtime && (
                   <>
                     <span>{formatTime(nextFeaturedShowtime.startTime)}</span>

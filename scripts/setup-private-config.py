@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 HOME = Path(os.environ.get('CV_NATIVE_HOME', str(ROOT.parent / '.native'))).resolve()
@@ -137,15 +138,37 @@ def main():
     if new_base_url:
         config["APP_BASE_URL"] = new_base_url
 
-    # Write securely with backup and atomic replace
+    # Write securely with timestamped backups, prune to keep 5 most recent, and atomic replace with fsync
     if CONFIG_PATH.exists():
+        content = CONFIG_PATH.read_text(encoding='utf-8')
+        # Maintain default movies.json.bak
         backup_path = CONFIG_PATH.with_suffix('.bak')
-        backup_path.write_text(CONFIG_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+        backup_path.write_text(content, encoding='utf-8')
         backup_path.chmod(0o600)
+
+        # Timestamped backup
+        ts = int(time.time())
+        ts_backup = CONFIG_PATH.parent / f'movies.json.bak.{ts}'
+        ts_backup.write_text(content, encoding='utf-8')
+        ts_backup.chmod(0o600)
+
+        # Prune older timestamped backups, keeping 5 most recent
+        existing_backups = sorted(
+            CONFIG_PATH.parent.glob('movies.json.bak.*'),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        )
+        for old_bak in existing_backups[5:]:
+            try:
+                old_bak.unlink()
+            except OSError:
+                pass
 
     temp_path = CONFIG_PATH.with_suffix('.tmp')
     with open(temp_path, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
     temp_path.chmod(0o600)
     temp_path.replace(CONFIG_PATH)
     CONFIG_PATH.chmod(0o600)

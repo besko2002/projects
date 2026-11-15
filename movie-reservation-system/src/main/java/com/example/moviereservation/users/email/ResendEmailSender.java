@@ -44,6 +44,22 @@ public class ResendEmailSender implements EmailSender {
         this.httpClient = httpClient;
     }
 
+    public static String maskEmail(String email) {
+        if (email == null || email.isBlank()) {
+            return "***";
+        }
+        int atIndex = email.indexOf('@');
+        if (atIndex <= 0) {
+            return "***";
+        }
+        String local = email.substring(0, atIndex);
+        String domain = email.substring(atIndex);
+        if (local.length() <= 1) {
+            return "*..." + domain;
+        }
+        return local.charAt(0) + "***" + domain;
+    }
+
     @Override
     public boolean isConfigured() {
         if (apiKey.isBlank()) {
@@ -73,7 +89,7 @@ public class ResendEmailSender implements EmailSender {
     @Override
     public void sendPasswordReset(String toEmail, String resetLink) {
         if (!isConfigured()) {
-            log.warn("Resend email sender is not configured; skipping password reset email to {}", toEmail);
+            log.warn("Resend email sender is not configured; skipping password reset email to {}", maskEmail(toEmail));
             return;
         }
 
@@ -184,14 +200,14 @@ public class ResendEmailSender implements EmailSender {
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                log.info("Sent email to {} via Resend (status={})", toEmail, response.statusCode());
+                log.info("Sent email to {} via Resend (status={})", maskEmail(toEmail), response.statusCode());
             } else {
-                log.error("Failed to send email via Resend to {}: status={} body={}",
-                        toEmail, response.statusCode(), response.body());
-                throw new IllegalStateException("Resend rejected delivery with status " + response.statusCode() + ": " + response.body());
+                log.error("Failed to send email via Resend to {}: status={}",
+                        maskEmail(toEmail), response.statusCode());
+                throw new IllegalStateException("Resend rejected delivery with status " + response.statusCode());
             }
         } catch (Exception ex) {
-            log.error("Exception while sending email via Resend to {}: {}", toEmail, ex.getMessage());
+            log.error("Exception while sending email via Resend to {}: {}", maskEmail(toEmail), ex.getMessage());
             if (ex instanceof RuntimeException runtimeException) {
                 throw runtimeException;
             }

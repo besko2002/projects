@@ -56,10 +56,9 @@ export function MovieCard({
           }
         >
           {!encodedPosterUrl && (
-            <>
-              <span className="stamp">{primaryGenre}</span>
-              <b>{movie.title}</b>
-            </>
+            <div className="poster-placeholder" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'flex-start', height: '100%' }}>
+              <span className="stamp">{primaryGenre || 'FEATURE'}</span>
+            </div>
           )}
         </div>
       </Link>
