@@ -460,14 +460,16 @@ input:focus-visible {
 }
 
 .feature .art {
-  border-right: var(--border-width) solid var(--ink);
   position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
   padding: 22px;
-  min-height: 200px;
+  /* Posters are 2:3; keep that shape so no artwork (title, tag line, genre tag) is cropped. */
+  aspect-ratio: 2 / 3;
+  align-self: start;
+  box-sizing: border-box;
 }
 
 .feature .art::before {
@@ -487,6 +489,8 @@ input:focus-visible {
 }
 
 .feature .body {
+  /* The divider lives on the body so it spans the full height even when the copy is taller than the poster. */
+  border-left: var(--border-width) solid var(--ink);
   padding: 26px 30px;
   display: flex;
   flex-direction: column;
@@ -613,7 +617,8 @@ input:focus-visible {
 /* 4-Column Ticket Cards Grid */
 .grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* minmax(0, 1fr): a long title must not widen its column and break the equal card grid. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 28px;
   margin-top: 30px;
 }
@@ -740,8 +745,12 @@ input:focus-visible {
   margin: 0 0 8px 0;
   color: var(--ink);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Up to two lines, so long titles are readable without widening the card. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 
 .meta {
@@ -1234,7 +1243,7 @@ input:focus-visible {
   }
 
   .grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .seat-layout {
@@ -1290,12 +1299,18 @@ input:focus-visible {
   }
 
   .feature .art {
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
-    aspect-ratio: 16 / 9;
-    border-right: none;
-    border-bottom: var(--border-width) solid var(--ink);
+    /* A centred, whole poster instead of a cropped strip. */
+    width: min(240px, calc(100% - 40px));
+    margin: 20px auto 0;
+    border: var(--border-width) solid var(--ink);
+  }
+
+  .feature .body {
+    border-left: none;
+  }
+
+  .nav {
+    flex-wrap: wrap;
   }
 
   .feature .art b {

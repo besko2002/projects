@@ -4,7 +4,7 @@ import * as moviesApi from '../../api/moviesApi';
 import * as schedulesApi from '../../api/schedulesApi';
 import * as adminApi from '../../api/adminApi';
 import { ApiException } from '../../api/client';
-import { formatLocalDate, getDaysBetween } from '../../utils/dateUtils';
+import { getDaysBetween, isValidTimeZone, todayInZone, zonedWallTimeToDate } from '../../utils/dateUtils';
 import type { MovieSummary } from '../../types/movie';
 import type { ScheduleSummary } from '../../types/schedule';
 import type { TheaterSummary } from '../../types/admin';
@@ -13,6 +13,11 @@ export interface BulkSlotResult {
   slot: string;
   status: 'created' | 'conflict' | 'past' | 'error';
   reason: string;
+}
+
+function addDaysToDateString(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
 export function AdminShowtimesPage(): React.JSX.Element {
@@ -28,6 +33,8 @@ export function AdminShowtimesPage(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  // Showtimes are planned in the cinema's own zone (app.schedule.zone), not the admin's browser zone.
+  const [cinemaZone, setCinemaZone] = useState<string | null>(null);
 
   // Mode: list / single / bulk
   const [activeTab, setActiveTab] = useState<'single' | 'bulk'>('single');
@@ -64,6 +71,26 @@ export function AdminShowtimesPage(): React.JSX.Element {
       setError(err instanceof Error ? err.message : 'Failed to load showtimes');
     }
   };
+
+  useEffect(() => {
+    let ignore = false;
+    Promise.resolve()
+      .then(() => schedulesApi.getScheduleSettings())
+      .then((settings) => {
+        if (!ignore && isValidTimeZone(settings?.zone)) setCinemaZone(settings.zone);
+      })
+      .catch(() => {
+        // Fall back to the browser zone; the form says which zone is in use.
+      });
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  const zoneNote = cinemaZone
+    ? `Times are cinema time (${cinemaZone}).`
+    : 'Cinema time zone unavailable; times use this browser\'s time zone.';
+  const zoneOption = cinemaZone ? { timeZone: cinemaZone } : {};
 
   // Initial load of movies, theaters and initial schedules
   useEffect(() => {
@@ -130,12 +157,7 @@ export function AdminShowtimesPage(): React.JSX.Element {
     setError(null);
     setSuccess(null);
 
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(18, 0, 0, 0);
-    const tzOffset = tomorrow.getTimezoneOffset() * 60000;
-    const localISOTime = new Date(tomorrow.getTime() - tzOffset).toISOString().slice(0, 16);
-    setStartDateTime(localISOTime);
+    setStartDateTime(`${addDaysToDateString(todayInZone(cinemaZone), 1)}T18:00`);
   };
 
   const handleOpenBulkScheduler = () => {
@@ -145,12 +167,9 @@ export function AdminShowtimesPage(): React.JSX.Element {
     setSuccess(null);
     setBulkResults(null);
 
-    const today = new Date();
-    const future = new Date();
-    future.setDate(today.getDate() + 7);
-
-    setBulkStartDate(formatLocalDate(today));
-    setBulkEndDate(formatLocalDate(future));
+    const today = todayInZone(cinemaZone);
+    setBulkStartDate(today);
+    setBulkEndDate(addDaysToDateString(today, 7));
   };
 
   const handleSingleSubmit = async (e: React.FormEvent) => {
@@ -167,7 +186,8 @@ export function AdminShowtimesPage(): React.JSX.Element {
     setSuccess(null);
 
     try {
-      const startInstant = new Date(startDateTime).toISOString();
+      const [datePart, timePart] = startDateTime.split('T');
+      const startInstant = zonedWallTimeToDate(datePart, timePart.slice(0, 5), cinemaZone).toISOString();
       await adminApi.createSchedule({
         movieId: Number(selectedMovieId),
         theaterId: Number(selectedTheaterId),
@@ -253,9 +273,7 @@ export function AdminShowtimesPage(): React.JSX.Element {
         const slotLabel = `${day} ${time}`;
         setBulkProgress(`Processing slot ${currentSlot} of ${totalSlots} (${slotLabel})…`);
 
-        const [hh, mm] = time.split(':').map(Number);
-        const [y, m, d] = day.split('-').map(Number);
-        const dt = new Date(y, m - 1, d, hh, mm, 0);
+        const dt = zonedWallTimeToDate(day, time, cinemaZone);
 
         if (dt.getTime() <= Date.now()) {
           pastCount++;
@@ -629,6 +647,9 @@ export function AdminShowtimesPage(): React.JSX.Element {
                     fontSize: '14px',
                   }}
                 />
+                <small style={{ display: 'block', marginTop: '4px', color: 'var(--ink-light)' }}>
+                  {zoneNote}
+                </small>
               </div>
 
               <div>
@@ -821,6 +842,9 @@ export function AdminShowtimesPage(): React.JSX.Element {
                     fontSize: '14px',
                   }}
                 />
+                <small style={{ display: 'block', marginTop: '4px', color: 'var(--ink-light)' }}>
+                  {zoneNote}
+                </small>
                 <span className="soft" style={{ fontSize: '12px' }}>
                   The scheduler will create screenings on each day across the date range. Overlapping or conflicting slots will be safely skipped.
                 </span>
@@ -942,12 +966,13 @@ export function AdminShowtimesPage(): React.JSX.Element {
                 const start = new Date(s.startTime);
                 const end = new Date(s.endTime);
                 const dateStr = start.toLocaleDateString(undefined, {
+                  ...zoneOption,
                   weekday: 'short',
                   month: 'short',
                   day: 'numeric',
                   year: 'numeric',
                 });
-                const timeStr = `${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – ${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                const timeStr = `${start.toLocaleTimeString([], { ...zoneOption, hour: '2-digit', minute: '2-digit' })} – ${end.toLocaleTimeString([], { ...zoneOption, hour: '2-digit', minute: '2-digit' })}`;
 
                 return (
                   <tr

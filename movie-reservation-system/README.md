@@ -172,7 +172,7 @@ Every setting is an environment variable (`src/main/resources/application.yml` h
 | `TICKET_CANCELLATION_CUTOFF_HOURS` | `2` | A PAID ticket can be cancelled (full refund) only until this many hours before the showtime. |
 | `TICKET_CHECKOUT_MINUTES` | `35` | Payment window: both the Checkout Session's `expires_at` and the extended seat-hold expiry. Stripe accepts 30–1440; outside that range the app fails to start. |
 | `SCHEDULE_BUFFER_MINUTES` | `15` | Cleaning time added after the movie duration when computing a schedule's `end_time`. |
-| `SCHEDULE_ZONE` | `UTC` | Business time zone used to interpret `GET /api/schedules?date=yyyy-MM-dd`. |
+| `SCHEDULE_ZONE` | `UTC` | Cinema time zone (IANA, e.g. `Africa/Cairo`). The admin panel enters and lists showtimes in this zone, the starting catalogue is planned in it, and it interprets `GET /api/schedules?date=yyyy-MM-dd`. |
 | `RESERVATION_HOLD_MINUTES` | `10` | How long a seat hold stays valid. |
 | `RESERVATION_MAX_SEATS` | `10` | Maximum seats per hold request. |
 | `RESERVATION_MAX_SEATS_PER_USER` | `8` | Maximum active seats (held or paid) one user may occupy in one schedule. |
@@ -242,6 +242,7 @@ password: Admin@12345
 | Method & path | Auth | Description |
 | ------------- | ---- | ----------- |
 | `GET /api/schedules?movieId=&theaterId=&date=&from=&to=&page=&size=&sort=` | public | Paged showtimes; `date` is a local date in `SCHEDULE_ZONE`, `from`/`to` are ISO-8601 instants compared as `[from, to)`. |
+| `GET /api/schedules/settings` | public | `{zone, bufferMinutes}`: the cinema time zone (`SCHEDULE_ZONE`) and cleaning buffer the admin UI plans in |
 | `GET /api/schedules/{id}` | public | One showtime with movie, theater and prices. |
 | `POST /api/schedules` | ADMIN | Create a showtime (`endTime` computed, overlaps rejected). |
 | `PUT /api/schedules/{id}` | ADMIN | Replace a showtime (overlap check runs again). |

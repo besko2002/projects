@@ -1,6 +1,6 @@
 import { request } from './client';
 import type { PageResponse } from '../types/api';
-import type { ScheduleDto, ScheduleSummary } from '../types/schedule';
+import type { ScheduleDto, ScheduleSettings, ScheduleSummary } from '../types/schedule';
 
 export interface ScheduleQueryParams {
   movieId?: number;
@@ -30,4 +30,8 @@ export async function getSchedules(
 
 export async function getSchedule(id: number): Promise<ScheduleDto> {
   return request<ScheduleDto>(`/api/schedules/${id}`);
+}
+
+export async function getScheduleSettings(): Promise<ScheduleSettings> {
+  return request<ScheduleSettings>('/api/schedules/settings');
 }

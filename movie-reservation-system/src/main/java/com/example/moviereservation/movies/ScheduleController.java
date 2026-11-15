@@ -77,6 +77,15 @@ public class ScheduleController {
         return scheduleService.listSchedules(movieId, theaterId, date, from, to, page, size, sort);
     }
 
+    @GetMapping("/settings")
+    @Operation(summary = "Cinema scheduling settings",
+            description = "The business time zone (app.schedule.zone) that showtimes are planned in, and the "
+                    + "cleaning buffer added after every film. The admin UI enters times in this zone.")
+    @ApiResponse(responseCode = "200", description = "Scheduling settings")
+    public ScheduleSettingsDto settings() {
+        return new ScheduleSettingsDto(scheduleService.getZone().getId(), scheduleService.getBufferMinutes());
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "Get one schedule with its movie, theater and prices")
     @ApiResponses({

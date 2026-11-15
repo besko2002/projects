@@ -4,7 +4,7 @@ This guide details the deployment architecture, configuration options, productio
 
 > [!IMPORTANT]
 > **Live Public URL: Not deployed / not verified.**
-> All build pipelines, unified packaging, SPA static forwarding, environment configurations, and database migrations are fully implemented and verified locally in native PostgreSQL execution (248 integration tests, 61 frontend tests). Live public cloud deployment is intentionally out of current scope awaiting host selection and budget approval from the project owner.
+> All build pipelines, unified packaging, SPA static forwarding, environment configurations, and database migrations are implemented and verified locally: the full backend suite against native PostgreSQL, the frontend suite, and an isolated browser run with a Stripe TEST payment and refund. The container image was built with `docker build` from a normal development checkout (with `frontend/node_modules` present); the container itself has not been run against a real deployment. Live public cloud deployment is intentionally out of current scope awaiting host selection and budget approval from the project owner.
 
 ---
 
@@ -115,6 +115,7 @@ For live payments or reviewer testing in hosted environments:
 | Environment Variable | Default / Example | Purpose | Required in Prod |
 | :--- | :--- | :--- | :---: |
 | `SPRING_PROFILES_ACTIVE` | `prod` | Spring profile to activate (`prod` enforces strong secrets guard) | **Yes** |
+| `SCHEDULE_ZONE` | `Africa/Cairo` | Cinema time zone; admin showtime entry and listing use it (default `UTC`) | Recommended |
 | `SERVER_PORT` | `8080` | HTTP listening port (`8093` in local native development) | No |
 | `APP_BASE_URL` | `https://cinebook.example.com` | Public base URL used to construct Stripe checkout success/cancel return URLs | **Yes** |
 | `FRONTEND_BASE_URL` | `https://cinebook.example.com` | Public frontend URL used to construct password reset links (defaults to `APP_BASE_URL`) | No |

@@ -5,6 +5,7 @@ import com.example.moviereservation.common.ConflictException;
 import com.example.moviereservation.common.ResourceNotFoundException;
 import com.example.moviereservation.security.JwtService;
 import com.example.moviereservation.users.email.EmailSender;
+import com.example.moviereservation.users.email.ResendEmailSender;
 import com.example.moviereservation.users.google.GoogleTokenPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -148,7 +149,7 @@ public class UserService {
                                     try {
                                         sender.sendPasswordReplacedByGoogleNotification(targetEmail);
                                     } catch (Exception ex) {
-                                        log.warn("Failed to dispatch password replaced notification to {}: {}", targetEmail, ex.getMessage());
+                                        log.warn("Failed to dispatch password replaced notification to {}: {}", ResendEmailSender.maskEmail(targetEmail), ex.getMessage());
                                     }
                                 }
                             });
@@ -156,7 +157,7 @@ public class UserService {
                             try {
                                 sender.sendPasswordReplacedByGoogleNotification(targetEmail);
                             } catch (Exception ex) {
-                                log.warn("Failed to dispatch password replaced notification to {}: {}", targetEmail, ex.getMessage());
+                                log.warn("Failed to dispatch password replaced notification to {}: {}", ResendEmailSender.maskEmail(targetEmail), ex.getMessage());
                             }
                         }
                     }
@@ -178,10 +179,11 @@ public class UserService {
                     user = userRepository.saveAndFlush(user);
                 } catch (DataIntegrityViolationException ex) {
                     // Do not query the database within the aborted transaction, which causes 500 error.
-                    log.warn("Unique constraint violation registering user via Google email={}: {}", email, ex.getMessage());
+                    // The driver message repeats the duplicate key value (the email), so it is not logged.
+                    log.warn("Unique constraint violation registering user via Google email={}", ResendEmailSender.maskEmail(email));
                     throw new ConflictException("Email is already registered");
                 }
-                log.info("Registered new user via Google id={} email={}", user.getId(), user.getEmail());
+                log.info("Registered new user via Google id={} email={}", user.getId(), ResendEmailSender.maskEmail(user.getEmail()));
             }
         }
 

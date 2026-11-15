@@ -185,6 +185,29 @@ class GoogleAuthIntegrationTest {
         assertThat(userRepository.findById(initial.getId()).orElseThrow().getPasswordHash()).isNull();
     }
 
+    @Test
+    @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+    void googleSignUpAndLinkLogsNeverContainTheRecipientEmail(
+            org.springframework.boot.test.system.CapturedOutput output) throws Exception {
+        String newEmail = "log-privacy-new-" + System.nanoTime() + "@cinema.test";
+        mockMvc.perform(post("/api/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new GoogleAuthRequest(
+                                validToken("google-sub-log-" + System.nanoTime(), newEmail, "Log Privacy")))))
+                .andExpect(status().isOk());
+
+        String linkEmail = "log-privacy-link-" + System.nanoTime() + "@cinema.test";
+        userRepository.saveAndFlush(new User("Link Privacy", linkEmail, "hashed-pass", Role.USER));
+        mockMvc.perform(post("/api/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new GoogleAuthRequest(
+                                validToken("google-sub-log-link-" + System.nanoTime(), linkEmail, "Link Privacy")))))
+                .andExpect(status().isOk());
+
+        assertThat(output.getAll()).contains("Registered new user via Google");
+        assertThat(output.getAll()).doesNotContain(newEmail).doesNotContain(linkEmail);
+    }
+
     @RepeatedTest(5)
     void concurrentFirstGoogleSignUpsForOneEmailNeverAnswer500() throws Exception {
         String sub = "google-sub-race-" + System.nanoTime();

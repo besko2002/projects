@@ -121,3 +121,57 @@ export function getDaysBetween(startStr: string, endStr: string): string[] {
   }
   return days;
 }
+
+/** True when the runtime knows this IANA time zone. */
+export function isValidTimeZone(timeZone: string | null | undefined): timeZone is string {
+  if (!timeZone) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Offset of `timeZone` from UTC at `instantMs`, in milliseconds (east of UTC is positive). */
+function zoneOffsetMs(instantMs: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(instantMs));
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  const wallAsUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'));
+  return wallAsUtc - Math.floor(instantMs / 1000) * 1000;
+}
+
+/**
+ * The instant at which the wall clock in `timeZone` shows `date` (YYYY-MM-DD) `time` (HH:mm).
+ * Without a valid zone the browser's own zone is used.
+ */
+export function zonedWallTimeToDate(date: string, time: string, timeZone?: string | null): Date {
+  const [y, m, d] = date.split('-').map(Number);
+  const [hh, mm] = time.split(':').map(Number);
+  if (!isValidTimeZone(timeZone)) {
+    return new Date(y, m - 1, d, hh, mm, 0);
+  }
+  const wallAsUtc = Date.UTC(y, m - 1, d, hh, mm, 0);
+  let guess = wallAsUtc;
+  for (let i = 0; i < 3; i++) {
+    const next = wallAsUtc - zoneOffsetMs(guess, timeZone);
+    if (next === guess) break;
+    guess = next;
+  }
+  return new Date(guess);
+}
+
+/** Today's date (YYYY-MM-DD) on the wall clock of `timeZone` (browser zone if invalid). */
+export function todayInZone(timeZone?: string | null, now: Date = new Date()): string {
+  if (!isValidTimeZone(timeZone)) return formatLocalDate(now);
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+}

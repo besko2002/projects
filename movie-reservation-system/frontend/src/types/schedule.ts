@@ -32,3 +32,9 @@ export interface ScheduleDto {
   endTime: string;
   prices: SchedulePricesDto;
 }
+
+/** Cinema scheduling settings (GET /api/schedules/settings). */
+export interface ScheduleSettings {
+  zone: string; // IANA zone the cinema plans showtimes in, e.g. "Africa/Cairo"
+  bufferMinutes: number;
+}
