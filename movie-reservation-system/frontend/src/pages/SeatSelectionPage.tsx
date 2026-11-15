@@ -29,22 +29,34 @@ export function SeatSelectionPage(): React.JSX.Element {
   const [seats, setSeats] = useState<SeatDto[]>([]);
   const [selectedSeatIds, setSelectedSeatIds] = useState<Set<number>>(new Set());
 
-  // Holds map: seatId -> SeatReservationDto (P1-1)
+  // Holds map: seatId -> SeatReservationDto
   const [heldReservations, setHeldReservations] = useState<Map<number, SeatReservationDto>>(
     new Map(),
   );
+  const [confirmedSeats, setConfirmedSeats] = useState<SeatReservationDto[]>([]);
+  const [pendingTicketId, setPendingTicketId] = useState<number | null>(null);
   const [heldExpiresAt, setHeldExpiresAt] = useState<string | null>(null);
 
-  const [loading, setLoading] = useState<boolean>(!isInvalidId);
+  // Loading & ownership reconciliation (Issue 2)
+  const [baseLoading, setBaseLoading] = useState<boolean>(!isInvalidId);
+  const [ownershipLoaded, setOwnershipLoaded] = useState<boolean>(false);
+  const [ownershipError, setOwnershipError] = useState<string | null>(null);
+  const [ownershipRetry, setOwnershipRetry] = useState<number>(0);
+
+  const isOwnershipReady = !user || ownershipLoaded;
+
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(
     isInvalidId ? 'Showtime not found.' : null,
   );
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
-  // Ref to track holds for cleanup on unmount if no ticket was created (P1-1)
+  // Lifecycle & submission race protection (Issue 3)
+  const isMountedRef = useRef<boolean>(true);
+  const submissionIdRef = useRef<number>(0);
   const ticketCreatedRef = useRef<boolean>(false);
   const heldReservationsRef = useRef<Map<number, SeatReservationDto>>(heldReservations);
+
   useEffect(() => {
     heldReservationsRef.current = heldReservations;
   }, [heldReservations]);
@@ -62,7 +74,7 @@ export function SeatSelectionPage(): React.JSX.Element {
         if (!ignore) {
           setSchedule(schedData);
           setSeats(mapData.seats);
-          setLoading(false);
+          setBaseLoading(false);
 
           // Restore previously saved seats from registration / login redirect
           try {
@@ -82,7 +94,7 @@ export function SeatSelectionPage(): React.JSX.Element {
       .catch((err) => {
         if (!ignore) {
           setError(err instanceof Error ? err.message : 'Showtime not found');
-          setLoading(false);
+          setBaseLoading(false);
         }
       });
 
@@ -91,64 +103,94 @@ export function SeatSelectionPage(): React.JSX.Element {
     };
   }, [scheduleId, isInvalidId]);
 
-  // Load existing user holds for this showtime (P1-1)
+  // Reconcile user reservations and existing pending tickets (Issue 1, 2, 4)
   useEffect(() => {
     let ignore = false;
-    if (isInvalidId || !user) return;
+    if (isInvalidId || authLoading || !user) return;
 
     seatsApi
       .getMyReservations()
       .then((reservations) => {
         if (!ignore) {
+          const now = Date.now();
+          const confirmed = reservations.filter(
+            (r) => r.scheduleId === scheduleId && r.status === 'CONFIRMED',
+          );
           const activeHolds = reservations.filter(
-            (r) => r.scheduleId === scheduleId && r.status === 'HELD',
+            (r) =>
+              r.scheduleId === scheduleId &&
+              r.status === 'HELD' &&
+              new Date(r.expiresAt).getTime() > now,
           );
 
-          if (activeHolds.length > 0) {
-            const map = new Map<number, SeatReservationDto>();
-            let earliestExpiry: number | null = null;
+          setConfirmedSeats(confirmed);
 
-            for (const h of activeHolds) {
-              map.set(h.seatId, h);
-              if (h.expiresAt) {
-                const expTime = new Date(h.expiresAt).getTime();
-                if (earliestExpiry === null || expTime < earliestExpiry) {
-                  earliestExpiry = expTime;
-                }
-              }
+          const map = new Map<number, SeatReservationDto>();
+          let earliestExpiry: number | null = null;
+          let foundTicketId: number | null = null;
+
+          for (const h of activeHolds) {
+            map.set(h.seatId, h);
+            if (h.ticketId != null) {
+              foundTicketId = h.ticketId;
             }
-
-            setHeldReservations(map);
-            setSelectedSeatIds((prev) => {
-              const next = new Set(prev);
-              for (const seatId of map.keys()) {
-                next.add(seatId);
+            if (h.expiresAt) {
+              const expTime = new Date(h.expiresAt).getTime();
+              if (earliestExpiry === null || expTime < earliestExpiry) {
+                earliestExpiry = expTime;
               }
-              return next;
-            });
-
-            if (earliestExpiry !== null) {
-              setHeldExpiresAt(new Date(earliestExpiry).toISOString());
             }
           }
+
+          setHeldReservations(map);
+          setPendingTicketId(foundTicketId);
+
+          // Reconcile selectedSeatIds to include all active server holds
+          setSelectedSeatIds((prev) => {
+            const next = new Set(prev);
+            for (const seatId of map.keys()) {
+              next.add(seatId);
+            }
+            return next;
+          });
+
+          if (earliestExpiry !== null) {
+            setHeldExpiresAt(new Date(earliestExpiry).toISOString());
+          } else {
+            setHeldExpiresAt(null);
+          }
+
+          setOwnershipLoaded(true);
+          setOwnershipError(null);
         }
       })
-      .catch(() => {
-        // Non-blocking if fails
+      .catch((err) => {
+        if (!ignore) {
+          // Do not silently proceed if ownership cannot be loaded (Issue 2)
+          setOwnershipLoaded(false);
+          setOwnershipError(
+            err instanceof Error
+              ? err.message
+              : 'Failed to verify existing seat reservations. Please retry.',
+          );
+        }
       });
 
     return () => {
       ignore = true;
     };
-  }, [scheduleId, user, isInvalidId]);
+  }, [scheduleId, user, authLoading, isInvalidId, ownershipRetry]);
 
-  // Cleanup on unmount: release active holds if no ticket was created (P1-1, P3: don't print "Released null")
+  // Cleanup on unmount: release ONLY loose holds (ticketId == null) if no ticket was created (Issue 3)
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       if (!ticketCreatedRef.current) {
-        const toRelease = Array.from(heldReservationsRef.current.values());
-        for (const res of toRelease) {
-          if (res && res.id) {
+        const activeReservations = Array.from(heldReservationsRef.current.values());
+        for (const res of activeReservations) {
+          // Never release ticket-linked holds implicitly (Issue 3)
+          if (res && res.id && res.ticketId == null) {
             void seatsApi.releaseReservation(res.id).catch(() => {});
           }
         }
@@ -159,56 +201,142 @@ export function SeatSelectionPage(): React.JSX.Element {
   const reloadSeatMap = async () => {
     try {
       const mapData = await seatsApi.getSeatMap(scheduleId);
-      setSeats(mapData.seats);
+      if (isMountedRef.current) {
+        setSeats(mapData.seats);
+      }
     } catch {
-      // Ignore
+      // Ignore map reload error
     }
   };
 
-  // Toggle seat selection (P1-1: release deselected ones immediately)
+  // Explicit cancellation of pending checkout (Issue 1)
+  const handleCancelPendingCheckout = async (ticketIdToCancel: number) => {
+    try {
+      setIsSubmitting(true);
+      setError(null);
+      await ticketsApi.cancelTicket(ticketIdToCancel);
+
+      try {
+        if (sessionStorage.getItem(PENDING_TICKET_KEY) === String(ticketIdToCancel)) {
+          sessionStorage.removeItem(PENDING_TICKET_KEY);
+        }
+      } catch {
+        // Storage issue ignored
+      }
+
+      // Remove seats that belonged to this ticket from local selection and holds
+      const ticketSeatIds = new Set<number>();
+      for (const [seatId, res] of heldReservations.entries()) {
+        if (res.ticketId === ticketIdToCancel) {
+          ticketSeatIds.add(seatId);
+        }
+      }
+
+      setHeldReservations((prev) => {
+        const next = new Map(prev);
+        for (const id of ticketSeatIds) {
+          next.delete(id);
+        }
+        return next;
+      });
+
+      setSelectedSeatIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ticketSeatIds) {
+          next.delete(id);
+        }
+        return next;
+      });
+
+      setPendingTicketId(null);
+      setInfoMessage('Your pending checkout was cancelled and its seats were released. You can now select new seats.');
+      void reloadSeatMap();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel pending checkout.');
+    } finally {
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+      }
+    }
+  };
+
+  // Toggle seat selection (Issue 1: never deselect if server refused release)
   const handleToggleSeat = async (seat: SeatDto) => {
+    if (isSubmitting || !isOwnershipReady) return;
     setError(null);
     setInfoMessage(null);
 
     const isCurrentlySelected = selectedSeatIds.has(seat.seatId);
 
     if (isCurrentlySelected) {
-      // If seat is currently held by this user, release it on the backend (P1-1)
       const existingRes = heldReservations.get(seat.seatId);
+
       if (existingRes && existingRes.id) {
+        // Seat is held on the server
         try {
           await seatsApi.releaseReservation(existingRes.id);
+          // Only remove if server actually released it
           setHeldReservations((prev) => {
             const next = new Map(prev);
             next.delete(seat.seatId);
             return next;
           });
-        } catch {
-          // If already released, proceed
+          setSelectedSeatIds((prev) => {
+            const next = new Set(prev);
+            next.delete(seat.seatId);
+            if (next.size === 0) {
+              setHeldExpiresAt(null);
+            }
+            return next;
+          });
+          void reloadSeatMap();
+        } catch (err) {
+          // Server refused to release! (e.g. 409 because it belongs to a pending ticket - Issue 1)
+          // NEVER REMOVE IT FROM THE UI IF RELEASE FAILED!
+          if (existingRes.ticketId != null) {
+            setError(
+              `Seat ${seat.rowLabel}${seat.seatNumber} is part of pending checkout #${existingRes.ticketId}. You can complete payment for your reserved seats, or cancel the pending checkout to change seats.`,
+            );
+          } else {
+            setError(
+              err instanceof Error
+                ? err.message
+                : `Failed to release seat ${seat.rowLabel}${seat.seatNumber}.`,
+            );
+          }
+          // Do NOT remove seat from selectedSeatIds!
+          return;
         }
+      } else {
+        // Seat was only selected locally (not yet held on server)
+        setSelectedSeatIds((prev) => {
+          const next = new Set(prev);
+          next.delete(seat.seatId);
+          return next;
+        });
+      }
+    } else {
+      // User is attempting to select a new seat
+      // If a pending ticket already exists, inform the user they must complete or cancel it (Issue 1)
+      if (pendingTicketId != null) {
+        setInfoMessage(
+          `You have an active pending checkout (#${pendingTicketId}). Complete payment for your reserved seats, or cancel the pending checkout to choose different seats.`,
+        );
+        return;
       }
 
-      setSelectedSeatIds((prev) => {
-        const next = new Set(prev);
-        next.delete(seat.seatId);
-        if (next.size === 0) {
-          setHeldExpiresAt(null);
-        }
-        return next;
-      });
-      void reloadSeatMap();
-    } else {
-      // Compute remaining allowance: 8 minus active reservations (P2-5)
-      const activeResCount = heldReservations.size;
+      // Check capacity limit: confirmed seats + active holds + unheld selections (Issue 4)
+      const confirmedCount = confirmedSeats.length;
+      const heldCount = heldReservations.size;
       const unheldSelectedCount = Array.from(selectedSeatIds).filter(
         (id) => !heldReservations.has(id),
       ).length;
 
-      if (activeResCount + unheldSelectedCount >= MAX_SEATS_PER_USER) {
+      if (confirmedCount + heldCount + unheldSelectedCount >= MAX_SEATS_PER_USER) {
         setInfoMessage(
-          `You can hold a maximum of ${MAX_SEATS_PER_USER} seats per showtime (remaining allowance: ${Math.max(
+          `You can hold a maximum of ${MAX_SEATS_PER_USER} seats per showtime (you have ${confirmedCount} confirmed, ${heldCount} held; remaining allowance: ${Math.max(
             0,
-            MAX_SEATS_PER_USER - activeResCount,
+            MAX_SEATS_PER_USER - (confirmedCount + heldCount),
           )}).`,
         );
         return;
@@ -237,19 +365,86 @@ export function SeatSelectionPage(): React.JSX.Element {
     return sum;
   }, [selectedSeats, heldReservations]);
 
-  // Countdown expiry handler (P1-1)
-  const handleHoldExpired = () => {
-    setHeldExpiresAt(null);
-    setHeldReservations(new Map());
-    setSelectedSeatIds(new Set());
-    setError('Your seat hold expired and the seats were released. Please select your seats again.');
-    void reloadSeatMap();
+  // Hold expiry handler: preserve later valid holds, recompute countdown (Issue 4)
+  const handleHoldExpired = async () => {
+    try {
+      if (user) {
+        const reservations = await seatsApi.getMyReservations();
+        const now = Date.now();
+        const validHolds = reservations.filter(
+          (r) =>
+            r.scheduleId === scheduleId &&
+            r.status === 'HELD' &&
+            new Date(r.expiresAt).getTime() > now,
+        );
+        const confirmed = reservations.filter(
+          (r) => r.scheduleId === scheduleId && r.status === 'CONFIRMED',
+        );
+
+        setConfirmedSeats(confirmed);
+
+        const map = new Map<number, SeatReservationDto>();
+        let earliestExpiry: number | null = null;
+        let foundTicketId: number | null = null;
+
+        for (const h of validHolds) {
+          map.set(h.seatId, h);
+          if (h.ticketId != null) foundTicketId = h.ticketId;
+          if (h.expiresAt) {
+            const exp = new Date(h.expiresAt).getTime();
+            if (earliestExpiry === null || exp < earliestExpiry) {
+              earliestExpiry = exp;
+            }
+          }
+        }
+
+        setHeldReservations(map);
+        setPendingTicketId(foundTicketId);
+
+        // Keep valid holds selected, drop expired holds
+        setSelectedSeatIds((prev) => {
+          const next = new Set<number>();
+          for (const id of prev) {
+            if (heldReservationsRef.current.has(id)) {
+              if (map.has(id)) next.add(id);
+            } else {
+              next.add(id);
+            }
+          }
+          return next;
+        });
+
+        if (earliestExpiry !== null) {
+          setHeldExpiresAt(new Date(earliestExpiry).toISOString());
+          setError('One or more seat holds expired. Your remaining valid holds are kept.');
+        } else {
+          setHeldExpiresAt(null);
+          setError('Your seat holds expired and the seats were released. Please select your seats again.');
+        }
+      } else {
+        setHeldExpiresAt(null);
+        setHeldReservations(new Map());
+        setSelectedSeatIds(new Set());
+        setError('Your seat hold expired. Please select your seats again.');
+      }
+      void reloadSeatMap();
+    } catch {
+      // Fallback
+      setHeldExpiresAt(null);
+      void reloadSeatMap();
+    }
   };
 
-  // Proceed to payment (P1-1, P1-2, P2-5)
+  // Proceed to payment (Issues 1, 2, 3)
   const handleProceed = async () => {
     if (selectedSeatIds.size === 0) {
       setError('Please select at least one seat to continue.');
+      return;
+    }
+
+    // Must wait for authentication and ownership reconciliation (Issue 2)
+    if (authLoading || !isOwnershipReady || ownershipError) {
+      setError('Please wait for your reservations to finish loading before proceeding.');
       return;
     }
 
@@ -261,26 +456,44 @@ export function SeatSelectionPage(): React.JSX.Element {
           JSON.stringify({ scheduleId, seatIds: Array.from(selectedSeatIds) }),
         );
       } catch {
-        // Storage error
+        // Storage error ignored
       }
       navigate(`/login?return=/book/${scheduleId}`);
       return;
     }
 
+    const currentSubmissionId = ++submissionIdRef.current;
     try {
       setIsSubmitting(true);
       setError(null);
 
-      // Step 1: Hold any newly selected seats not yet held by this user (P1-2)
+      // Check for extra loose holds alongside an existing pending ticket (Issue 1)
       const unheldSeatIds = Array.from(selectedSeatIds).filter(
         (id) => !heldReservations.has(id),
       );
 
+      if (pendingTicketId != null && unheldSeatIds.length > 0) {
+        setError(
+          `You have an existing pending checkout (#${pendingTicketId}). To add new seats, cancel the pending checkout first, or proceed to complete your existing checkout.`,
+        );
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Step 1: Hold newly selected seats
       if (unheldSeatIds.length > 0) {
         const holdRes = await seatsApi.holdSeats(scheduleId, unheldSeatIds);
-        setHeldExpiresAt(holdRes.expiresAt);
 
-        // Update heldReservations map
+        // Guard async continuation with lifecycle ownership (Issue 3)
+        if (!isMountedRef.current || currentSubmissionId !== submissionIdRef.current) {
+          // Page was unmounted during holdSeats request; release newly created holds immediately!
+          for (const item of holdRes.seats) {
+            void seatsApi.releaseReservation(item.reservationId).catch(() => {});
+          }
+          return;
+        }
+
+        setHeldExpiresAt(holdRes.expiresAt);
         setHeldReservations((prev) => {
           const next = new Map(prev);
           for (const item of holdRes.seats) {
@@ -300,6 +513,12 @@ export function SeatSelectionPage(): React.JSX.Element {
 
       // Step 2: Checkout ticket via Stripe gateway (idempotent for current pending)
       const ticketRes = await ticketsApi.checkoutTicket(scheduleId);
+
+      // Guard async continuation: do not redirect after booking page was disposed (Issue 3)
+      if (!isMountedRef.current || currentSubmissionId !== submissionIdRef.current) {
+        return;
+      }
+
       ticketCreatedRef.current = true;
       sessionStorage.setItem(PENDING_TICKET_KEY, String(ticketRes.ticketId));
 
@@ -309,23 +528,28 @@ export function SeatSelectionPage(): React.JSX.Element {
         navigate('/payment/success');
       }
     } catch (err) {
+      if (!isMountedRef.current || currentSubmissionId !== submissionIdRef.current) {
+        return;
+      }
+
       if (err instanceof ApiException && err.status === 503) {
         setError(
           'Online payment is currently unavailable (Stripe payment gateway is not configured). Your held seats are preserved.',
         );
       } else if (err instanceof ApiException && err.status === 409) {
-        // P2-5: Show backend's actual error message for 409
         setError(err.message || 'One or more of your selected seats were just taken.');
         void reloadSeatMap();
       } else {
         setError(err instanceof Error ? err.message : 'An error occurred during checkout.');
       }
     } finally {
-      setIsSubmitting(false);
+      if (isMountedRef.current && currentSubmissionId === submissionIdRef.current) {
+        setIsSubmitting(false);
+      }
     }
   };
 
-  if (isInvalidId || (!loading && !schedule && error)) {
+  if (isInvalidId || (!baseLoading && !schedule && error)) {
     return (
       <div className="screen screen-container">
         <TopBar step={2} />
@@ -343,7 +567,8 @@ export function SeatSelectionPage(): React.JSX.Element {
     );
   }
 
-  if (loading || authLoading || !schedule) {
+  // Show skeleton until base schedule and auth are loaded
+  if (baseLoading || authLoading || !schedule) {
     return (
       <div className="screen screen-container">
         <TopBar step={2} />
@@ -354,7 +579,16 @@ export function SeatSelectionPage(): React.JSX.Element {
     );
   }
 
-  const remainingAllowance = Math.max(0, MAX_SEATS_PER_USER - selectedSeatIds.size);
+  // Calculate allowance including confirmed seats (Issue 4)
+  const confirmedCount = confirmedSeats.length;
+  const heldCount = heldReservations.size;
+  const unheldSelectedCount = Array.from(selectedSeatIds).filter(
+    (id) => !heldReservations.has(id),
+  ).length;
+  const remainingAllowance = Math.max(
+    0,
+    MAX_SEATS_PER_USER - (confirmedCount + heldCount + unheldSelectedCount),
+  );
 
   return (
     <div className="screen screen-container" id="seats">
@@ -365,6 +599,28 @@ export function SeatSelectionPage(): React.JSX.Element {
           {schedule.movie.title} · {schedule.theater.name} · {formatFullDateTime(schedule.startTime)}
         </div>
         <h1>Pick your seats</h1>
+
+        {ownershipError && (
+          <div
+            className="error-banner"
+            role="alert"
+            style={{
+              marginTop: 'var(--space-4)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <span>{ownershipError}</span>
+            <button
+              type="button"
+              className="btn btn-compact"
+              onClick={() => setOwnershipRetry((r) => r + 1)}
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="error-banner" role="alert" style={{ marginTop: 'var(--space-4)' }}>
@@ -389,6 +645,37 @@ export function SeatSelectionPage(): React.JSX.Element {
           </div>
         )}
 
+        {pendingTicketId != null && (
+          <div
+            className="pending-checkout-notice"
+            style={{
+              marginTop: 'var(--space-4)',
+              background: 'var(--paper)',
+              border: '3px solid var(--red)',
+              padding: 'var(--space-4) var(--space-6)',
+              boxShadow: 'var(--shadow)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 'var(--space-3)',
+            }}
+          >
+            <div>
+              <span className="kicker" style={{ color: 'var(--red)' }}>Active checkout pending</span>
+              <b>Ticket #{pendingTicketId} is awaiting payment for these seats.</b>
+            </div>
+            <button
+              type="button"
+              className="btn btn-compact btn-danger"
+              disabled={isSubmitting}
+              onClick={() => handleCancelPendingCheckout(pendingTicketId)}
+            >
+              Cancel pending checkout
+            </button>
+          </div>
+        )}
+
         <div className="seat-layout">
           {/* Outlined Seat Map Grid with Roving Tabindex */}
           <div className="hall-wrapper">
@@ -397,6 +684,7 @@ export function SeatSelectionPage(): React.JSX.Element {
               selectedSeatIds={selectedSeatIds}
               onToggleSeat={handleToggleSeat}
               maxSeatsReached={remainingAllowance === 0}
+              disabled={isSubmitting || !isOwnershipReady || !!ownershipError}
             />
           </div>
 
@@ -407,6 +695,21 @@ export function SeatSelectionPage(): React.JSX.Element {
             </div>
 
             <div className="body">
+              {confirmedCount > 0 && (
+                <div
+                  style={{
+                    padding: 'var(--space-2) var(--space-3)',
+                    background: '#194240',
+                    color: 'var(--paper)',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    marginBottom: 'var(--space-3)',
+                  }}
+                >
+                  ✓ You have {confirmedCount} confirmed ticket(s) for this showtime
+                </div>
+              )}
+
               <div style={{ minHeight: '60px' }}>
                 {selectedSeats.length === 0 ? (
                   <p className="soft" style={{ fontSize: '14px', fontStyle: 'italic', padding: 'var(--space-2) 0' }}>
@@ -416,10 +719,13 @@ export function SeatSelectionPage(): React.JSX.Element {
                   selectedSeats.map((s) => {
                     const held = heldReservations.get(s.seatId);
                     const seatPrice = held ? held.price : s.price;
+                    const isTicketLinked = held?.ticketId != null;
+
                     return (
                       <div key={s.seatId} className="li">
                         <span>
                           {s.rowLabel}{s.seatNumber} · {s.type === 'VIP' ? 'VIP' : 'Standard'}
+                          {isTicketLinked && ' [Reserved]'}
                         </span>
                         <b>{formatMoney(seatPrice)}</b>
                       </div>
@@ -448,7 +754,12 @@ export function SeatSelectionPage(): React.JSX.Element {
               <button
                 type="button"
                 className="btn red"
-                disabled={selectedSeats.length === 0 || isSubmitting}
+                disabled={
+                  selectedSeats.length === 0 ||
+                  isSubmitting ||
+                  !isOwnershipReady ||
+                  !!ownershipError
+                }
                 onClick={handleProceed}
                 style={{ width: '100%' }}
               >

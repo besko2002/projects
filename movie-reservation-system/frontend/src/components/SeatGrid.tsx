@@ -6,6 +6,7 @@ interface SeatGridProps {
   selectedSeatIds: Set<number>;
   onToggleSeat: (seat: SeatDto) => void;
   maxSeatsReached?: boolean;
+  disabled?: boolean;
 }
 
 export function SeatGrid({
@@ -13,6 +14,7 @@ export function SeatGrid({
   selectedSeatIds,
   onToggleSeat,
   maxSeatsReached = false,
+  disabled = false,
 }: SeatGridProps): React.JSX.Element {
   // Group seats by row
   const rowsMap = new Map<string, SeatDto[]>();
@@ -123,7 +125,7 @@ export function SeatGrid({
                 }
 
                 const limitDisabled = !isSelected && maxSeatsReached;
-                const isDisabled = (!isAvailable && !isSelected) || limitDisabled;
+                const isDisabled = disabled || (!isAvailable && !isSelected) || limitDisabled;
 
                 const limitExplanation = limitDisabled
                   ? ' (Selection limit reached: maximum 8 seats per user for this showtime)'
