@@ -56,14 +56,19 @@ export interface RevenueReport {
   netRevenue: number;
   byMovie?: Array<{
     movieId: number;
-    movieTitle: string;
-    paidTickets: number;
-    grossRevenue: number;
+    title?: string;
+    movieTitle?: string;
+    tickets?: number;
+    paidTickets?: number;
+    revenue?: number;
+    grossRevenue?: number;
   }>;
   byDay?: Array<{
     date: string;
-    paidTickets: number;
-    grossRevenue: number;
+    tickets?: number;
+    paidTickets?: number;
+    revenue?: number;
+    grossRevenue?: number;
   }>;
 }
 

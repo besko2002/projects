@@ -172,17 +172,14 @@ public class UserService {
                 String name = (payload.name() != null && !payload.name().isBlank())
                         ? payload.name().trim()
                         : email.split("@")[0];
-                if (name.length() > 100) {
-                    name = name.substring(0, 100);
-                }
+                name = truncateName(name, 100);
                 user = new User(name, email, null, Role.USER, payload.sub());
                 try {
                     user = userRepository.saveAndFlush(user);
                 } catch (DataIntegrityViolationException ex) {
-                    if (userRepository.findByEmail(email).isPresent()) {
-                        throw new ConflictException("Email is already registered");
-                    }
-                    throw ex;
+                    // Do not query the database within the aborted transaction, which causes 500 error.
+                    log.warn("Unique constraint violation registering user via Google email={}: {}", email, ex.getMessage());
+                    throw new ConflictException("Email is already registered");
                 }
                 log.info("Registered new user via Google id={} email={}", user.getId(), user.getEmail());
             }
@@ -244,6 +241,18 @@ public class UserService {
         String token = jwtService.generateToken(user.getId(), user.getEmail(), user.getRole().name(),
                 user.getTokenVersion());
         return AuthResponse.of(token, jwtService.getExpirationSeconds(), UserDto.from(user), notice);
+    }
+
+    static String truncateName(String name, int maxCodePoints) {
+        if (name == null) {
+            return null;
+        }
+        int codePointCount = name.codePointCount(0, name.length());
+        if (codePointCount <= maxCodePoints) {
+            return name;
+        }
+        int endIndex = name.offsetByCodePoints(0, maxCodePoints);
+        return name.substring(0, endIndex);
     }
 
     private static boolean exceedsBcryptLimit(String rawPassword) {

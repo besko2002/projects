@@ -62,9 +62,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request) {
-        String message = (ex.getMessage() != null && !ex.getMessage().isBlank())
-                ? ex.getMessage()
-                : "You do not have permission to access this resource";
+        // Do not leak internal entity or ownership details (e.g. "Ticket 5 belongs to another user")
+        String message = "You do not have permission to access this resource";
+        if (ex.getMessage() != null && ex.getMessage().contains("Staff administrator accounts must sign in with email and password")) {
+            message = ex.getMessage();
+        }
         return build(HttpStatus.FORBIDDEN, message, request);
     }
 

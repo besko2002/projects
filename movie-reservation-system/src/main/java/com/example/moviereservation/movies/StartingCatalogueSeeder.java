@@ -75,30 +75,20 @@ public class StartingCatalogueSeeder {
      * @return {@code true} if starting content was seeded, {@code false} if skipped
      */
     public synchronized boolean seedIfEmpty() {
-        boolean lockAcquired = false;
         try {
-            Boolean locked = jdbcTemplate.queryForObject(
-                    "SELECT pg_try_advisory_lock(84729104)", Boolean.class);
-            lockAcquired = Boolean.TRUE.equals(locked);
-        } catch (Exception ex) {
-            log.debug("Advisory lock not available or failed: {}; proceeding with instance-level synchronization", ex.getMessage());
-            lockAcquired = true;
-        }
-
-        if (!lockAcquired) {
-            log.info("Another instance holds the starting catalogue seeder lock; skipping.");
-            return false;
-        }
-
-        try {
-            Boolean result = transactionTemplate.execute(status -> doSeedIfEmpty());
+            Boolean result = transactionTemplate.execute(status -> {
+                Boolean locked = jdbcTemplate.queryForObject(
+                        "SELECT pg_try_advisory_xact_lock(84729104)", Boolean.class);
+                if (!Boolean.TRUE.equals(locked)) {
+                    log.info("Another instance holds the starting catalogue seeder lock; skipping.");
+                    return false;
+                }
+                return doSeedIfEmpty();
+            });
             return Boolean.TRUE.equals(result);
-        } finally {
-            try {
-                jdbcTemplate.queryForObject("SELECT pg_advisory_unlock(84729104)", Boolean.class);
-            } catch (Exception ex) {
-                log.debug("Failed to release advisory lock: {}", ex.getMessage());
-            }
+        } catch (Exception ex) {
+            log.error("Catalogue seeding transaction aborted: {}", ex.getMessage());
+            return false;
         }
     }
 
@@ -114,8 +104,8 @@ public class StartingCatalogueSeeder {
             log.warn("Could not check app_metadata for starting catalogue seeder: {}", ex.getMessage());
         }
 
-        if (movieService.count() > 0 || theaterService.count() > 0) {
-            log.info("Existing catalogue detected (movies > 0 or theaters > 0); skipping initial content seeding to preserve saved database.");
+        if (movieService.count() > 0 || theaterService.count() > 0 || !genreService.getAllGenres().isEmpty()) {
+            log.info("Existing catalogue detected (movies > 0, theaters > 0, or genres > 0); skipping initial content seeding to preserve saved database.");
             recordMetadata("skipped_existing_data");
             return false;
         }

@@ -307,4 +307,36 @@ class GoogleAuthIntegrationTest {
         assertThat(created.getName()).hasSizeLessThanOrEqualTo(100);
         assertThat(created.getName()).isEqualTo(longName.substring(0, 100));
     }
+
+    @Test
+    void googleNameWithEmojiDoesNotSplitSurrogatePairAtBoundary() throws Exception {
+        // 99 ASCII chars followed by a 2-char surrogate pair emoji (🎬)
+        String prefix = "A".repeat(99);
+        String nameWithEmoji = prefix + "\uD83C\uDFAC"; // 99 ASCII + 2 surrogate chars = 101 chars, 100 codepoints
+        String sub = "google-sub-emoji-" + System.nanoTime();
+        String email = "emoji-" + System.nanoTime() + "@cinema.test";
+        String token = validToken(sub, email, nameWithEmoji);
+
+        mockMvc.perform(post("/api/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new GoogleAuthRequest(token))))
+                .andExpect(status().isOk());
+
+        User created = userRepository.findByGoogleSub(sub).orElseThrow();
+        assertThat(created.getName()).isEqualTo(nameWithEmoji);
+
+        // 100 ASCII chars + emoji (101 codepoints): truncates to 100 codepoints without dangling surrogate
+        String name101 = "B".repeat(100) + "\uD83C\uDFAC";
+        String sub2 = "google-sub-emoji2-" + System.nanoTime();
+        String email2 = "emoji2-" + System.nanoTime() + "@cinema.test";
+        String token2 = validToken(sub2, email2, name101);
+
+        mockMvc.perform(post("/api/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new GoogleAuthRequest(token2))))
+                .andExpect(status().isOk());
+
+        User created2 = userRepository.findByGoogleSub(sub2).orElseThrow();
+        assertThat(created2.getName()).isEqualTo("B".repeat(100));
+    }
 }

@@ -152,11 +152,13 @@ export function AdminReportsPage(): React.JSX.Element {
     }
   };
 
-  const formatCurrency = (amount: number, curr = 'USD') => {
+  const formatCurrency = (amount: number | string | undefined | null, curr = 'USD') => {
+    const val = typeof amount === 'number' ? amount : Number(amount);
+    if (isNaN(val)) return '$0.00';
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: curr,
-    }).format(amount);
+    }).format(val);
   };
 
   const getStatusBadge = (status: string) => {
@@ -322,15 +324,20 @@ export function AdminReportsPage(): React.JSX.Element {
                         </tr>
                       </thead>
                       <tbody>
-                        {revenueData.byMovie.map((m) => (
-                          <tr key={m.movieId} style={{ borderBottom: '1px solid var(--sand)' }}>
-                            <td style={{ padding: '10px 14px', fontWeight: 600 }}>{m.movieTitle}</td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right' }}>{m.paidTickets}</td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                              {formatCurrency(m.grossRevenue, revenueData.currency)}
-                            </td>
-                          </tr>
-                        ))}
+                        {revenueData.byMovie.map((m) => {
+                          const title = m.title || m.movieTitle || `Movie #${m.movieId}`;
+                          const ticketsCount = m.tickets ?? m.paidTickets ?? 0;
+                          const revenue = m.revenue ?? m.grossRevenue ?? 0;
+                          return (
+                            <tr key={m.movieId} style={{ borderBottom: '1px solid var(--sand)' }}>
+                              <td style={{ padding: '10px 14px', fontWeight: 600 }}>{title}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right' }}>{ticketsCount}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                                {formatCurrency(revenue, revenueData.currency)}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -353,15 +360,19 @@ export function AdminReportsPage(): React.JSX.Element {
                         </tr>
                       </thead>
                       <tbody>
-                        {revenueData.byDay.map((d) => (
-                          <tr key={d.date} style={{ borderBottom: '1px solid var(--sand)' }}>
-                            <td style={{ padding: '10px 14px', fontWeight: 600 }}>{d.date}</td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right' }}>{d.paidTickets}</td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                              {formatCurrency(d.grossRevenue, revenueData.currency)}
-                            </td>
-                          </tr>
-                        ))}
+                        {revenueData.byDay.map((d) => {
+                          const ticketsCount = d.tickets ?? d.paidTickets ?? 0;
+                          const revenue = d.revenue ?? d.grossRevenue ?? 0;
+                          return (
+                            <tr key={d.date} style={{ borderBottom: '1px solid var(--sand)' }}>
+                              <td style={{ padding: '10px 14px', fontWeight: 600 }}>{d.date}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right' }}>{ticketsCount}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                                {formatCurrency(revenue, revenueData.currency)}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -637,7 +648,7 @@ export function AdminReportsPage(): React.JSX.Element {
                             : '—'}
                         </td>
                         <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                          ${Number(t.totalPrice).toFixed(2)}
+                          ${Number(t.totalPrice || 0).toFixed(2)}
                         </td>
                         <td style={{ padding: '10px 14px', fontSize: '12px', color: 'var(--ink-light)' }}>
                           {new Date(t.createdAt).toLocaleString()}

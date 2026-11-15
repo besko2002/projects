@@ -385,6 +385,14 @@ describe('CB-5: Timezone-Safe Bulk Scheduler & Slot Results', () => {
       last: true,
     });
 
+    const baseDate = new Date();
+    baseDate.setDate(baseDate.getDate() + 10);
+    const date1 = new Date(baseDate);
+    const date2 = new Date(baseDate);
+    date2.setDate(date2.getDate() + 2);
+    const d1Str = date1.toISOString().slice(0, 10);
+    const d2Str = date2.toISOString().slice(0, 10);
+
     // Mock createSchedule to succeed on call 1, fail with 409 Conflict on call 2, and 403 Forbidden on call 3
     vi.mocked(adminApi.createSchedule)
       .mockResolvedValueOnce({
@@ -393,8 +401,8 @@ describe('CB-5: Timezone-Safe Bulk Scheduler & Slot Results', () => {
         movieTitle: 'Casablanca',
         theaterId: 10,
         theaterName: 'Classic Hall',
-        startTime: '2027-01-01T12:00:00Z',
-        endTime: '2027-01-01T13:42:00Z',
+        startTime: `${d1Str}T12:00:00Z`,
+        endTime: `${d1Str}T13:42:00Z`,
         basePrice: 10.0,
         vipPrice: 15.0,
       })
@@ -442,9 +450,9 @@ describe('CB-5: Timezone-Safe Bulk Scheduler & Slot Results', () => {
 
     fireEvent.change(movieSelect, { target: { value: '1' } });
     fireEvent.change(theaterSelect, { target: { value: '10' } });
-    fireEvent.change(startDateInput, { target: { value: '2027-01-01' } });
-    fireEvent.change(endDateInput, { target: { value: '2027-01-03' } });
-    fireEvent.change(timesInput, { target: { value: '12:00' } }); // 3 slots total: 2027-01-01, 02, 03 at 12:00
+    fireEvent.change(startDateInput, { target: { value: d1Str } });
+    fireEvent.change(endDateInput, { target: { value: d2Str } });
+    fireEvent.change(timesInput, { target: { value: '12:00' } }); // 3 slots total: d1, d1+1, d2 at 12:00
 
     const submitBtn = screen.getByRole('button', { name: /Run Bulk Generation/i });
     fireEvent.click(submitBtn);
@@ -453,6 +461,16 @@ describe('CB-5: Timezone-Safe Bulk Scheduler & Slot Results', () => {
     const reportPanel = await screen.findByTestId('bulk-results-panel');
     expect(reportPanel).toBeInTheDocument();
     expect(screen.getByText(/Bulk Schedule Slot Report \(3 slots processed\)/i)).toBeInTheDocument();
+
+    // Verify createSchedule received the expected payload with relative startTime
+    const expectedFirstStartTime = new Date(`${d1Str}T12:00:00`).toISOString();
+    expect(adminApi.createSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        movieId: 1,
+        theaterId: 10,
+        startTime: expectedFirstStartTime,
+      }),
+    );
 
     // Verify outcomes: created, conflict, error
     expect(screen.getByText('created')).toBeInTheDocument();
@@ -641,8 +659,21 @@ describe('Admin CRUD Pages', () => {
       refundedTickets: 5,
       refundedAmount: 100.0,
       netRevenue: 2300.0,
-      byMovie: [],
-      byDay: [],
+      byMovie: [
+        {
+          movieId: 1,
+          title: 'Inception',
+          tickets: 1,
+          revenue: 10.0,
+        },
+      ],
+      byDay: [
+        {
+          date: '2026-10-15',
+          tickets: 1,
+          revenue: 10.0,
+        },
+      ],
     });
 
     render(
@@ -654,5 +685,7 @@ describe('Admin CRUD Pages', () => {
     expect(await screen.findByText('$2,400.00')).toBeInTheDocument();
     expect(screen.getByText('$2,300.00')).toBeInTheDocument();
     expect(screen.getByText(/100\.00/)).toBeInTheDocument();
+    expect(screen.getByText('Inception')).toBeInTheDocument();
+    expect(screen.queryByText('$NaN')).toBeNull();
   });
 });

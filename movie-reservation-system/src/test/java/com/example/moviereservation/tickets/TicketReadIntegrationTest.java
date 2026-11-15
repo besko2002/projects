@@ -111,7 +111,8 @@ class TicketReadIntegrationTest extends AbstractTicketIntegrationTest {
         mockMvc.perform(get("/api/tickets/" + ticketId)
                         .header("Authorization", TicketApiFixtures.bearer(stranger.token())))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.status").value(403));
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.message").value("You do not have permission to access this resource"));
 
         mockMvc.perform(get("/api/tickets/" + ticketId)
                         .header("Authorization", TicketApiFixtures.bearer(adminToken)))
