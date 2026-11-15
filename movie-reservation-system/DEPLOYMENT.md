@@ -3,8 +3,8 @@
 This guide details the deployment architecture, configuration options, production readiness, and hosting requirements for CineBook (Movie Reservation System).
 
 > [!IMPORTANT]
-> **Hosting Status: Deployment Prepared — Awaiting Host Selection & Cost Approval**
-> All build pipelines, unified container/JAR packaging, SPA static forwarding, environment configurations, and database migrations are fully implemented and verified locally. Live public deployment is currently deferred awaiting explicit platform selection and budget authorization from the project owner.
+> **Live Public URL: Not deployed / not verified.**
+> All build pipelines, unified container/JAR packaging, SPA static forwarding, environment configurations, and database migrations are fully implemented and verified locally in native and container environments. Live public cloud deployment is intentionally out of current scope awaiting host selection and budget approval from the project owner.
 
 ---
 
@@ -13,22 +13,22 @@ This guide details the deployment architecture, configuration options, productio
 CineBook can be deployed under two standard production topologies:
 
 ### Option A: Unified Self-Contained JAR (Recommended for Simple Deployments)
-In this mode, the Vite frontend is built into static assets (`npm run build`) and copied to Spring Boot's `src/main/resources/static/`. Spring Boot serves both the API endpoints (`/api/**`) and the React SPA (`index.html`) on a single port (e.g., `8080`).
+In this mode, the Vite frontend is built into static assets (`npm run build`) and served from Spring Boot's `src/main/resources/static/`. Spring Boot serves both the API endpoints (`/api/**`) and the React SPA (`index.html`) on a single port (e.g., `8080` in Docker or `8093` in native development).
 
 - **Pros**: Zero CORS configuration required, single deployable artifact (`movie-reservation-system.jar`), single HTTPS domain, minimal operational overhead.
-- **Routing**: `SpaWebController` forwards all HTML navigation routes (`/`, `/login`, `/register`, `/tickets`, `/movie/{id}`, `/book/{id}`) to `index.html`. Unmatched API routes under `/api/**` return strict JSON `404 ApiError` instead of falling through to HTML.
+- **Routing**: `SpaWebController` forwards all client HTML navigation routes (`/`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/tickets`, `/movie/{id}`, `/book/{id}`, `/admin/**`) to `index.html`. Unmatched API routes under `/api/**` return strict JSON `404 ApiError` instead of falling through to HTML.
 
 ### Option B: Decoupled Frontend (CDN/Vercel/Cloudflare) + Backend API (Container/PaaS)
 In this mode, the frontend is deployed as a static site to a CDN or edge hosting service (e.g., Cloudflare Pages, Vercel, AWS S3 + CloudFront), and the Spring Boot application runs on a managed container service (e.g., AWS ECS, Google Cloud Run, Render, Railway).
 
 - **Pros**: Independent frontend and backend scaling, global edge caching for static assets.
-- **Requirements**: CORS headers configured via `app.cors.allowed-origins`, domain routing for `/api/**` through reverse proxy or distinct subdomain (e.g., `api.cinebook.example.com`).
+- **Routing**: Domain routing through a reverse proxy (e.g. Nginx path-routing) or distinct subdomains (e.g., `app.cinebook.example.com` and `api.cinebook.example.com`).
 
 ---
 
 ## 2. Production Topology & Reverse Proxy (HTTPS)
 
-In any production deployment with real customer or demo traffic, TLS termination should be handled by a reverse proxy (e.g., Nginx, Caddy, or a Cloud Load Balancer):
+In any production deployment with real customer traffic, TLS termination and client IP forwarding should be handled by a reverse proxy (e.g., Nginx, Caddy, or a Cloud Load Balancer):
 
 ```
                      Internet (HTTPS :443)
@@ -52,6 +52,14 @@ In any production deployment with real customer or demo traffic, TLS termination
                │       PostgreSQL Database     │
                │         (Port 5432)           │
                └───────────────────────────────┘
+```
+
+### Trusted Proxy & Client IP Configuration
+When running behind a reverse proxy or load balancer, ensure Spring Boot trusts the forwarded headers (`X-Forwarded-For`, `X-Forwarded-Proto`) so that rate limiters and audit logs correctly track client IP addresses rather than the proxy's internal IP:
+
+```yaml
+server:
+  forward-headers-strategy: native
 ```
 
 ### Sample Nginx Configuration Snippet
@@ -99,28 +107,45 @@ For live payments or reviewer testing in hosted environments:
 
 | Environment Variable | Default / Example | Purpose | Required in Prod |
 | :--- | :--- | :--- | :---: |
-| `SPRING_PROFILES_ACTIVE` | `prod` | Spring profile to activate | Optional |
-| `SERVER_PORT` | `8080` | HTTP listening port | No |
-| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://db:5432/movie_reservation` | JDBC connection URL for PostgreSQL | **Yes** |
-| `SPRING_DATASOURCE_USERNAME` | `postgres` | Database username | **Yes** |
-| `SPRING_DATASOURCE_PASSWORD` | `(secret)` | Database password | **Yes** |
-| `JWT_SECRET` | `(min 32-char secret)` | Signing key for HMAC-SHA256 user JWTs | **Yes** |
+| `SPRING_PROFILES_ACTIVE` | `prod` | Spring profile to activate (`prod` enforces strong secrets guard) | **Yes** |
+| `SERVER_PORT` | `8080` | HTTP listening port (`8093` in local native development) | No |
+| `APP_BASE_URL` | `https://cinebook.example.com` | Public base URL used to construct Stripe checkout success/cancel return URLs | **Yes** |
+| `DB_URL` | `jdbc:postgresql://db:5432/movie_reservation` | JDBC connection URL for PostgreSQL | **Yes** |
+| `DB_USERNAME` | `postgres` | Database username | **Yes** |
+| `DB_PASSWORD` | `(secret)` | Database password | **Yes** |
+| `JWT_SECRET` | `(min 32-char secret)` | Signing key for HMAC-SHA256 user JWTs (refuses dev defaults in `prod`) | **Yes** |
+| `ADMIN_EMAIL` | `admin@cinema.local` | Email address of seeded staff administrator | **Yes** |
+| `ADMIN_PASSWORD` | `(secret)` | Password of seeded administrator (must change from default in `prod`) | **Yes** |
 | `STRIPE_SECRET_KEY` | `sk_test_...` or `sk_live_...` | Stripe API Secret Key | **Yes** |
 | `STRIPE_WEBHOOK_SECRET` | `whsec_...` | Stripe Webhook signing secret | **Yes** |
-| `STRIPE_SUCCESS_URL` | `https://domain/payment/success?session_id={CHECKOUT_SESSION_ID}` | Post-checkout redirect URL | **Yes** |
-| `STRIPE_CANCEL_URL` | `https://domain/payment/cancel?session_id={CHECKOUT_SESSION_ID}` | Cancelled checkout redirect URL | **Yes** |
-| `DEMO_MODE_ENABLED` | `false` | Enables 1-click visitor accounts & rolling catalogue | Optional |
-| `DEMO_RATE_LIMIT_PER_MINUTE`| `15` | Max visitor sessions generated per IP per minute | No |
-| `TICKET_HOLD_MINUTES` | `10` | Duration of temporary seat hold during checkout | No |
+| `STRIPE_CURRENCY` | `usd` | ISO 4217 currency for Stripe checkout | No |
+| `RESERVATION_HOLD_MINUTES` | `10` | Duration of temporary seat hold during checkout | No |
 | `TICKET_CANCELLATION_CUTOFF_HOURS` | `2` | Hours before showtime cutoff for self-service refund | No |
+| `GOOGLE_CLIENT_ID` | `...apps.googleusercontent.com` | Google OAuth Web Client ID for Google Identity Services sign-in | Optional |
+| `RESEND_API_KEY` | `re_...` | Resend HTTPS API key for sending transactional password reset emails | Optional |
+| `MAIL_FROM` | `CineBook <noreply@yourdomain.com>` | Sender email header for password reset notifications | Optional |
 
 ---
 
 ## 5. Security & Isolation Controls
 
-1. **Demo Mode Safety Gate**:
-   When `DEMO_MODE_ENABLED=true`, `DemoSafetyValidator` guarantees that any configured `STRIPE_SECRET_KEY` begins with `sk_test_` or `rk_test_`. If a production live key (`sk_live_`) is accidentally configured with demo mode active, Spring Boot crashes on startup immediately to prevent test runs against live money.
-2. **Least Privilege Visitor Sessions**:
-   Temporary demo users are registered with `ROLE_USER` and isolated per browser visitor (`demo-<uuid>@demo.cinebook.local`). They cannot access administrative endpoints or touch other patrons' tickets.
-3. **Database Schema Migrations**:
-   Flyway runs automatically on application boot to apply schema migrations idempotently (`V1` through `V4`). No manual schema execution is required.
+1. **Production Secret Startup Guard**:
+   When `SPRING_PROFILES_ACTIVE=prod` is activated, Spring Boot inspects configured credentials on startup. It immediately halts initialization if default placeholder secrets (`dev-secret...`, `Admin@12345`, etc.) or weak JWT signing keys are detected.
+2. **Role-Based Access Control**:
+   - Customer accounts are registered with `ROLE_USER`.
+   - The staff administration console (`/admin`, `/api/admin/**`, `/api/movies` [mutations], `/api/theaters` [mutations], `/api/schedules` [mutations], `/api/genres` [mutations]) strictly enforces `ROLE_ADMIN`.
+   - Attempting to access administrative facilities with standard user tokens yields `403 Forbidden`.
+3. **Password Reset Token Security**:
+   - Random 32-byte cryptographically secure tokens (`SecureRandom`).
+   - Only SHA-256 hashes of tokens are stored in PostgreSQL; raw tokens never touch logs or databases.
+   - Tokens expire after 30 minutes and are strictly single-use.
+   - Completing a password reset automatically revokes all existing JWT sessions (`tokenVersion` increment).
+4. **Google Identity Verification**:
+   - Server-side cryptographic verification of Google ID tokens against Google's public RSA JWK sets (`https://www.googleapis.com/oauth2/v3/certs`).
+   - Verifies signature, issuer (`accounts.google.com` or `https://accounts.google.com`), audience (`GOOGLE_CLIENT_ID`), expiration, and email verification.
+   - Newly created Google users are strictly assigned `ROLE_USER` (never `ADMIN`).
+5. **Database Schema Migrations**:
+   Flyway runs automatically on application boot to apply schema migrations idempotently (`V1` through `V12`).
+   - `V1`–`V10`: Core entities, theaters, seat maps, reservations, tickets, refunds, showtime exclusion constraint.
+   - `V11`: Safe cleanup of leftover demo accounts.
+   - `V12`: Nullable password hash for Google SSO, `google_sub` column, `password_reset_tokens` table, and `app_metadata` table.

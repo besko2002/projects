@@ -21,7 +21,7 @@ repository — it calls that module's public service.
                 │                                                                       │
   users ──── movies ──── theaters ──── seatreservation ──── tickets ────────────► Stripe
     │           │            │               │                  │
-    └───────────┴────────────┴─── PostgreSQL (one database, Flyway V1–V10) ──────┘
+    └───────────┴────────────┴─── PostgreSQL (one database, Flyway V1–V12) ──────┘
 ```
 
 | Module            | Responsibility |
@@ -78,7 +78,9 @@ Runs on port 5177 with Vite proxy forwarding `/api` and `/payment` to `http://lo
 3. **Seat Selection**: Interactive hall seat grid (Standard & VIP seats), real-time hold countdown timer, pricing summary, and Stripe checkout trigger.
 4. **Payment Success**: Webhook-confirmed ticket status polling, entry code, and downloadable/printable cinema ticket voucher.
 5. **My Tickets**: Tabbed ticket management (`Upcoming`, `Past`, `Cancelled & refunded`), with in-app cancellation and automated Stripe refund processing.
-6. **Authentication**: Sign in and registration modals/pages with seamless redirect back to selected seats.
+6. **Authentication**: Sign in and registration modals/pages with Google Identity Services SSO and email/password.
+7. **Password Recovery**: Self-service 30-minute tokenized password reset (`/forgot-password` and `/reset-password`).
+8. **Staff Admin Console**: Staff-only administration panel (`/admin`) for movies catalogue, genres classification, halls & seating grids, showtimes with bulk scheduler, and business reports (revenue, hall occupancy, tickets ledger).
 
 Screenshots are catalogued under `docs/screenshots/frontend/`:
 - `1-home.png`
@@ -88,6 +90,12 @@ Screenshots are catalogued under `docs/screenshots/frontend/`:
 - `5-my-tickets.png`
 - `6-sign-in.png`
 - `7-register.png`
+- `8-mobile-375px.png`
+- `9-forgot-password.png`
+- `10-reset-password.png`
+- `11-admin-movies.png`
+- `12-admin-showtimes.png`
+- `13-admin-reports.png`
 
 #### Accessibility & Contrast
 All color combinations strictly comply with WCAG 2.1 AA (≥ 4.5:1 for standard text, ≥ 3:1 for UI boundaries). Faint secondary text is elevated to `#9298ba` (> 5.5:1 on background `#0b0d16`). Seats feature dual sensory indicators (shape/color + diamond `◆`, checkmark `✓`, clock `⏱`, and cross `✕` symbols) with full screen-reader ARIA labeling. Reduced-motion preferences are honored.
@@ -170,6 +178,11 @@ Every setting is an environment variable (`src/main/resources/application.yml` h
 | `RESERVATION_MAX_SEATS_PER_USER` | `8` | Maximum active seats (held or paid) one user may occupy in one schedule. |
 | `RESERVATION_SWEEP_MS` | `60000` | Interval of the expired-hold sweeper, in milliseconds. |
 | `APP_BASE_URL` | `http://localhost:8080` | Absolute base URL used to build Stripe success/cancel return URLs. |
+| `GOOGLE_CLIENT_ID` | *(empty)* | Google OAuth Web Client ID for Google Identity Services token verification. |
+| `RESEND_API_KEY` | *(empty)* | Resend HTTPS API key for sending password reset emails. |
+| `MAIL_FROM` | *(empty)* | Sender address for outgoing emails (e.g. `CineBook <boxoffice@example.com>`). |
+
+Configure private settings securely without echoing secrets using `python3 scripts/setup-private-config.py`.
 
 For deployment, activate `SPRING_PROFILES_ACTIVE=prod`, supply strong `JWT_SECRET`,
 `ADMIN_PASSWORD` and `DB_PASSWORD`, and terminate HTTPS before the API. The `prod` profile
