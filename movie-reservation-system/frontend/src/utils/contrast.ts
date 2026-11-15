@@ -1,5 +1,6 @@
 /**
  * WCAG 2.1 Color Contrast Utilities and Palette Verification.
+ * CineBook Retro Cinema Design System
  */
 
 export function parseHex(hex: string): [number, number, number] {
@@ -33,33 +34,22 @@ export function getContrastRatio(hex1: string, hex2: string): number {
 }
 
 /**
- * CineBook Design System Palette
- * All color combinations are tuned to meet or exceed WCAG AA requirements:
+ * CineBook Retro Cinema Palette
+ * All color combinations meet or exceed WCAG AA requirements:
  * - Normal text: >= 4.5:1
- * - Large text & UI controls: >= 3.0:1
+ * - Large display text & UI controls: >= 3.0:1
  */
 export const PALETTE = {
-  // Backgrounds
-  bg: '#0b0d16',
-  panel: '#141828',
-  panel2: '#1b2034',
-
-  // Foreground text (elevated from draft #6d7290 to ensure >= 4.5:1 contrast)
-  ink: '#f3f1ea',
-  inkSoft: '#aeb3cc',
-  inkFaint: '#9298ba', // tuned for > 5.5:1 on #0b0d16 and > 4.5:1 on #1b2034
-
-  // Accents & Interactive Controls
-  amber: '#ffb547',
-  amberDeep: '#f08c1c',
-  amberDarkText: '#1a1205', // high contrast text on amber button/chips (> 10:1)
-
-  // Status & Badges
-  mint: '#3ddc97',
-  mintBg: '#0f2f24',
-  rose: '#ff667d',
-  roseBg: '#351620',
-  violet: '#8b7bff',
+  cream: '#f3ead7',
+  paper: '#fffaf0',
+  ink: '#221a14',
+  inkSoft: '#5e4d3e',
+  red: '#b5302b',
+  redDeep: '#8f221e',
+  teal: '#1f6f6b',
+  mustard: '#e2a73a',
+  sand: '#c9b99a',
+  bulb: '#ffd56b',
 } as const;
 
 export interface ContrastAuditResult {
@@ -79,20 +69,21 @@ export function auditPaletteContrast(): ContrastAuditResult[] {
     background: string;
     type: 'normal' | 'large' | 'ui';
   }> = [
-    { pair: 'Primary text on main background', foreground: PALETTE.ink, background: PALETTE.bg, type: 'normal' },
-    { pair: 'Primary text on panel background', foreground: PALETTE.ink, background: PALETTE.panel, type: 'normal' },
-    { pair: 'Primary text on panel2 background', foreground: PALETTE.ink, background: PALETTE.panel2, type: 'normal' },
-    { pair: 'Soft text on main background', foreground: PALETTE.inkSoft, background: PALETTE.bg, type: 'normal' },
-    { pair: 'Soft text on panel background', foreground: PALETTE.inkSoft, background: PALETTE.panel, type: 'normal' },
-    { pair: 'Faint/secondary text on main background', foreground: PALETTE.inkFaint, background: PALETTE.bg, type: 'normal' },
-    { pair: 'Faint/secondary text on panel background', foreground: PALETTE.inkFaint, background: PALETTE.panel, type: 'normal' },
-    { pair: 'Faint/secondary text on panel2 background', foreground: PALETTE.inkFaint, background: PALETTE.panel2, type: 'normal' },
-    { pair: 'Text on primary amber button', foreground: PALETTE.amberDarkText, background: PALETTE.amber, type: 'normal' },
-    { pair: 'Paid badge mint text on dark mint bg', foreground: PALETTE.mint, background: PALETTE.mintBg, type: 'normal' },
-    { pair: 'Rose alert text on dark rose bg', foreground: PALETTE.rose, background: PALETTE.roseBg, type: 'normal' },
-    { pair: 'Active keyboard focus ring on main background', foreground: PALETTE.amber, background: PALETTE.bg, type: 'ui' },
-    { pair: 'Active keyboard focus ring on panel background', foreground: PALETTE.amber, background: PALETTE.panel, type: 'ui' },
-    { pair: 'Selected seat boundary indicator', foreground: PALETTE.amber, background: PALETTE.panel2, type: 'ui' },
+    { pair: 'Ink primary text on cream page background', foreground: PALETTE.ink, background: PALETTE.cream, type: 'normal' },
+    { pair: 'Ink primary text on paper card background', foreground: PALETTE.ink, background: PALETTE.paper, type: 'normal' },
+    { pair: 'Ink-soft subdued text on cream page background', foreground: PALETTE.inkSoft, background: PALETTE.cream, type: 'normal' },
+    { pair: 'Ink-soft subdued text on paper card background', foreground: PALETTE.inkSoft, background: PALETTE.paper, type: 'normal' },
+    { pair: 'Paper text on red primary button', foreground: PALETTE.paper, background: PALETTE.red, type: 'normal' },
+    { pair: 'Paper text on teal active day / selected seat', foreground: PALETTE.paper, background: PALETTE.teal, type: 'normal' },
+    { pair: 'Paper text on dark ink tile / summary header', foreground: PALETTE.paper, background: PALETTE.ink, type: 'normal' },
+    { pair: 'Bulb sign text on red marquee header', foreground: PALETTE.bulb, background: PALETTE.red, type: 'large' },
+    { pair: 'Bulb title accent on dark ink summary header', foreground: PALETTE.bulb, background: PALETTE.ink, type: 'normal' },
+    { pair: 'Ink text/icon on mustard VIP seat', foreground: PALETTE.ink, background: PALETTE.mustard, type: 'normal' },
+    { pair: 'Ink text on bulb countdown clock', foreground: PALETTE.ink, background: PALETTE.bulb, type: 'normal' },
+    { pair: 'Red kicker/link text on paper card', foreground: PALETTE.red, background: PALETTE.paper, type: 'normal' },
+    { pair: 'Red kicker headline on cream background', foreground: PALETTE.red, background: PALETTE.cream, type: 'normal' },
+    { pair: 'Ink keyboard focus indicator on cream background', foreground: PALETTE.ink, background: PALETTE.cream, type: 'ui' },
+    { pair: 'Bulb keyboard focus indicator on red marquee', foreground: PALETTE.bulb, background: PALETTE.red, type: 'ui' },
   ];
 
   return pairs.map(({ pair, foreground, background, type }) => {
