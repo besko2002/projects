@@ -6,7 +6,7 @@ export interface Resource<T> {
   error: string | null;
   loading: boolean;
   /** Refetches with the same loader, e.g. after a mutation. */
-  reload: () => void;
+  reload: () => Promise<void>;
   /** Replaces the held value without a round trip. */
   setData: (value: T) => void;
 }
@@ -28,6 +28,12 @@ export function useResource<T>(
   const [loading, setLoading] = useState(true);
   const [nonce, setNonce] = useState(0);
   const loaderRef = useRef(loader);
+  const reloadSequence = useRef(0);
+  const waiters = useRef<{ sequence: number; resolve: () => void }[]>([]);
+
+  useEffect(() => () => {
+    waiters.current.splice(0).forEach(({ resolve }) => resolve());
+  }, []);
 
   // Keep the latest loader without restarting the fetch effect. Declared before it, so on every
   // render the ref is current by the time the fetch effect runs.
@@ -60,6 +66,14 @@ export function useResource<T>(
         }
         setError(errorMessage(cause));
         setLoading(false);
+      })
+      .finally(() => {
+        // A superseded request must not release a mutation's refresh barrier.
+        if (!cancelled) {
+          const settled = waiters.current.filter((waiter) => waiter.sequence <= nonce);
+          waiters.current = waiters.current.filter((waiter) => waiter.sequence > nonce);
+          settled.forEach(({ resolve }) => resolve());
+        }
       });
 
     return () => {
@@ -68,8 +82,12 @@ export function useResource<T>(
     };
   }, [key, nonce]);
 
-  const reload = useCallback((): void => {
-    setNonce((current) => current + 1);
+  const reload = useCallback((): Promise<void> => {
+    const sequence = ++reloadSequence.current;
+    return new Promise((resolve) => {
+      waiters.current.push({ sequence, resolve });
+      setNonce(sequence);
+    });
   }, []);
 
   const replace = useCallback((value: T): void => {

@@ -81,7 +81,7 @@ export function DashboardPage(): JSX.Element {
         await api.checkOut();
         toast.success('Checked out.');
       }
-      attendance.reload();
+      await attendance.reload();
     } catch (cause) {
       // 409 is the normal "already open" / "nothing open" answer: show its message.
       setClockError(errorMessage(cause));

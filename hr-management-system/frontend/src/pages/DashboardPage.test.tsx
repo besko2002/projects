@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import {
@@ -36,6 +36,32 @@ const CHECKED_OUT: Record<string, RouteHandler> = {
 };
 
 describe('dashboard', () => {
+  it.each(['in', 'out'] as const)('blocks a second check-%s while the post-mutation reload is deferred', async (direction) => {
+    const user = userEvent.setup();
+    let reads = 0;
+    let release = () => {};
+    const mock = installFetchMock(dashboardRoutes({
+      'GET /api/attendance/today': () => {
+        reads += 1;
+        if (reads === 1) return { body: makeAttendanceRange({ days: [makeDay({ openSession: direction === 'out' })] }) };
+        return new Promise((resolve) => {
+          release = () => resolve({ body: makeAttendanceRange({ days: [makeDay({ openSession: direction === 'in' })] }) });
+        });
+      },
+      [`POST /api/attendance/check-${direction}`]: { status: 201, body: { id: 'session-1' } },
+    }));
+    renderApp('/');
+    const button = await screen.findByRole('button', { name: `Check ${direction}` });
+    await user.click(button);
+    await screen.findByText(`Checked ${direction}.`);
+    await waitFor(() => expect(reads).toBe(2));
+    expect(button).toBeDisabled();
+    await user.click(button);
+    expect(mock.callsTo(`POST /api/attendance/check-${direction}`)).toHaveLength(1);
+    await act(async () => { release(); });
+    expect(screen.getByRole('button', { name: `Check ${direction === 'in' ? 'out' : 'in'}` })).toBeEnabled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
   it('uses the server business day rather than a browser-local date to find the open session', async () => {
     const businessDay = '2030-01-01';
     const mock = installFetchMock(dashboardRoutes({
