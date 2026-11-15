@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" width="100%" height="100%">
+  <defs>
+    <linearGradient id="seaSky" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#082422"/>
+      <stop offset="40%" stop-color="#114542"/>
+      <stop offset="75%" stop-color="#1f6f6b"/>
+      <stop offset="100%" stop-color="#55a8a3"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="600" fill="url(#seaSky)"/>
+  <circle cx="200" cy="280" r="160" fill="none" stroke="#7dd3fc" stroke-width="1" opacity="0.2" stroke-dasharray="4,8"/>
+  <circle cx="200" cy="280" r="100" fill="none" stroke="#7dd3fc" stroke-width="1" opacity="0.3"/>
+  <polygon points="200,280 0,160 0,220" fill="#ffd56b" opacity="0.25"/>
+  <polygon points="200,280 400,200 400,270" fill="#ffd56b" opacity="0.3"/>
+  <rect x="190" y="250" width="20" height="60" fill="#f3ead7"/>
+  <polygon points="186,250 214,250 200,225" fill="#b5302b"/>
+  <polygon points="120,400 280,400 230,310 170,310" fill="#1c2d2b"/>
+  <path d="M-20,430 Q80,390 180,430 T380,420 T420,430 L420,600 L-20,600 Z" fill="#0c2120"/>
+  <path d="M-20,470 Q100,440 220,480 T420,470 L420,600 L-20,600 Z" fill="#061514"/>
+  <rect x="16" y="16" width="368" height="568" fill="none" stroke="#f3ead7" stroke-width="4"/>
+  <rect x="22" y="22" width="356" height="556" fill="none" stroke="#ffd56b" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <rect x="36" y="36" width="328" height="30" fill="#061514"/>
+  <text x="200" y="56" font-family="'Courier New', monospace" font-size="12" font-weight="900" fill="#7dd3fc" text-anchor="middle" letter-spacing="4">★ SIGNAL FROM BENEATH ★</text>
+  <text x="200" y="130" font-family="'Impact', sans-serif" font-size="48" font-weight="900" fill="#f3ead7" text-anchor="middle" letter-spacing="3">TIDEWATCH</text>
+  <text x="200" y="152" font-family="'Courier New', monospace" font-size="12" font-weight="bold" fill="#ffd56b" text-anchor="middle" letter-spacing="2">THE LIGHTHOUSE NEVER LIES</text>
+  <rect x="130" y="534" width="140" height="26" fill="#1f6f6b" rx="4"/>
+  <text x="200" y="551" font-family="'Courier New', monospace" font-size="11" font-weight="900" fill="#f3ead7" text-anchor="middle" letter-spacing="2">SCI-FI / MYSTERY</text>
+</svg>

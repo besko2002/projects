@@ -1,6 +1,7 @@
-import React, { useContext } from 'react';
+import React, { useContext, useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router';
 import { AuthContext } from '../context/useAuth';
+import { DemoBanner } from './DemoBanner';
 
 interface TopBarProps {
   searchQuery?: string;
@@ -11,8 +12,11 @@ interface TopBarProps {
 export function TopBar({ searchQuery, onSearchChange, step }: TopBarProps): React.JSX.Element {
   const auth = useContext(AuthContext);
   const user = auth?.user ?? null;
+  const demoStatus = auth?.demoStatus ?? null;
+  const loginDemo = auth?.loginDemo ?? (async () => {});
   const logout = auth?.logout ?? (async () => {});
   const navigate = useNavigate();
+  const [isDemoLoading, setIsDemoLoading] = useState(false);
 
   const handleLogout = async () => {
     try {
@@ -23,9 +27,22 @@ export function TopBar({ searchQuery, onSearchChange, step }: TopBarProps): Reac
     navigate('/');
   };
 
+  const handleTryDemo = async () => {
+    setIsDemoLoading(true);
+    try {
+      await loginDemo();
+    } catch {
+      // Ignored - error displayed in banner or page
+    } finally {
+      setIsDemoLoading(false);
+    }
+  };
+
   return (
-    <header className="top top-bar" role="banner">
-      <Link to="/" className="sign" aria-label="CineBook Home">
+    <>
+      <DemoBanner />
+      <header className="top top-bar" role="banner">
+        <Link to="/" className="sign" aria-label="CineBook Home">
         CINEBOOK
       </Link>
 
@@ -98,6 +115,17 @@ export function TopBar({ searchQuery, onSearchChange, step }: TopBarProps): Reac
           </>
         ) : (
           <div className="guest-nav">
+            {demoStatus?.enabled && (
+              <button
+                type="button"
+                className="btn-out btn-try-demo"
+                onClick={handleTryDemo}
+                disabled={isDemoLoading}
+                aria-label="Try demo session"
+              >
+                {isDemoLoading ? 'Starting…' : '⚡ Try demo'}
+              </button>
+            )}
             <Link to="/login" className="btn-out">
               Sign in
             </Link>
@@ -108,5 +136,6 @@ export function TopBar({ searchQuery, onSearchChange, step }: TopBarProps): Reac
         )}
       </div>
     </header>
+    </>
   );
 }

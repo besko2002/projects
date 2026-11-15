@@ -4,6 +4,7 @@ import { TopBar } from '../components/TopBar';
 import { DateSelector } from '../components/DateSelector';
 import { GenreChips } from '../components/GenreChips';
 import { MovieCard } from '../components/MovieCard';
+import { useAuth } from '../context/useAuth';
 import type { GenreDto, MovieSummary } from '../types/movie';
 import type { ScheduleSummary } from '../types/schedule';
 import * as moviesApi from '../api/moviesApi';
@@ -29,6 +30,20 @@ export function HomePage(): React.JSX.Element {
   const [schedulesError, setSchedulesError] = useState<string | null>(null);
   const [catalogueRetry, setCatalogueRetry] = useState<number>(0);
   const [schedulesRetry, setSchedulesRetry] = useState<number>(0);
+
+  const { user, demoStatus, loginDemo = async () => {} } = useAuth();
+  const [isHomeDemoLoading, setIsHomeDemoLoading] = useState(false);
+
+  const handleHomeDemoClick = async () => {
+    setIsHomeDemoLoading(true);
+    try {
+      await loginDemo();
+    } catch {
+      // Ignored - error displayed in top demo banner
+    } finally {
+      setIsHomeDemoLoading(false);
+    }
+  };
 
   // Derived loading states without synchronous setState in effects (React 19 / ESLint)
   const loading = (loadedGenre !== selectedGenre && !catalogueError) || loadedGenre === undefined;
@@ -163,6 +178,26 @@ export function HomePage(): React.JSX.Element {
       <main className="wrap">
         <div className="kicker">{todayLabel}</div>
         <h1>Now playing</h1>
+
+        {!user && demoStatus?.enabled && (
+          <div className="demo-home-hero" style={{ margin: 'var(--space-3) 0 var(--space-4) 0', padding: 'var(--space-3) var(--space-4)', background: 'var(--sand-light, #fbf7ee)', border: '1px solid var(--sand)', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+            <div>
+              <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>Exploring CineBook for review?</strong>
+              <p className="soft" style={{ margin: '4px 0 0 0', fontSize: '13px' }}>
+                Pick a film below or start a 1-click temporary session to test checkout and automated refunds.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn teal btn-compact"
+              onClick={handleHomeDemoClick}
+              disabled={isHomeDemoLoading}
+              aria-label="Start demo customer session"
+            >
+              {isHomeDemoLoading ? 'Starting…' : '⚡ Try demo in 1 click'}
+            </button>
+          </div>
+        )}
 
         {catalogueError && (
           <div

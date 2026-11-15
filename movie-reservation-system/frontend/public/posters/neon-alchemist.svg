@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" width="100%" height="100%">
+  <defs>
+    <linearGradient id="neonSky" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#180828"/>
+      <stop offset="50%" stop-color="#2e1055"/>
+      <stop offset="100%" stop-color="#110520"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="600" fill="url(#neonSky)"/>
+  <!-- City grid -->
+  <g stroke="#06b6d4" stroke-width="1" opacity="0.3">
+    <line x1="50" y1="350" x2="0" y2="600"/>
+    <line x1="120" y1="350" x2="80" y2="600"/>
+    <line x1="200" y1="350" x2="200" y2="600"/>
+    <line x1="280" y1="350" x2="320" y2="600"/>
+    <line x1="350" y1="350" x2="400" y2="600"/>
+    <line x1="0" y1="400" x2="400" y2="400"/>
+    <line x1="0" y1="460" x2="400" y2="460"/>
+    <line x1="0" y1="530" x2="400" y2="530"/>
+  </g>
+  <!-- Alchemist flask -->
+  <path d="M185,220 L215,220 L215,260 L260,330 C270,345 260,365 240,365 L160,365 C140,365 130,345 140,330 L185,260 Z" fill="none" stroke="#ec4899" stroke-width="4"/>
+  <path d="M155,335 C170,320 230,320 245,335 L240,360 L160,360 Z" fill="#06b6d4" opacity="0.7"/>
+  <circle cx="200" cy="300" r="8" fill="#fef08a"/>
+  <rect x="16" y="16" width="368" height="568" fill="none" stroke="#ec4899" stroke-width="3"/>
+  <rect x="22" y="22" width="356" height="556" fill="none" stroke="#06b6d4" stroke-width="1.5"/>
+  <rect x="36" y="36" width="328" height="30" fill="#110520"/>
+  <text x="200" y="56" font-family="'Courier New', monospace" font-size="12" font-weight="900" fill="#06b6d4" text-anchor="middle" letter-spacing="4">★ MEMORY SYNTHESIS ★</text>
+  <text x="200" y="125" font-family="'Impact', sans-serif" font-size="40" font-weight="900" fill="#fef08a" text-anchor="middle" letter-spacing="2">THE NEON</text>
+  <text x="200" y="165" font-family="'Impact', sans-serif" font-size="42" font-weight="900" fill="#ec4899" text-anchor="middle" letter-spacing="2">ALCHEMIST</text>
+  <rect x="120" y="534" width="160" height="26" fill="#9333ea" rx="4"/>
+  <text x="200" y="551" font-family="'Courier New', monospace" font-size="11" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="2">SCI-FI / THRILLER</text>
+</svg>

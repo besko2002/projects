@@ -124,6 +124,22 @@ public class UserService {
         }
     }
 
+    /**
+     * Creates an isolated temporary customer session for portfolio demo visitors.
+     * Always granted {@link Role#USER}; never granted administrator privileges.
+     */
+    @Transactional
+    public AuthResponse createDemoSession() {
+        String uuid = java.util.UUID.randomUUID().toString().substring(0, 8);
+        String email = "demo-" + uuid + "@demo.cinebook.local";
+        String name = "Demo Guest " + uuid.toUpperCase(Locale.ROOT);
+        String randomPassword = java.util.UUID.randomUUID().toString();
+        User user = new User(name, email, passwordEncoder.encode(randomPassword), Role.USER);
+        user = userRepository.saveAndFlush(user);
+        log.info("Created temporary demo session user id={} email={}", user.getId(), user.getEmail());
+        return issueToken(user);
+    }
+
     private AuthResponse issueToken(User user) {
         String token = jwtService.generateToken(user.getId(), user.getEmail(), user.getRole().name(),
                 user.getTokenVersion());

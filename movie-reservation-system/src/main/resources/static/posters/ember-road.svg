@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" width="100%" height="100%">
+  <defs>
+    <linearGradient id="emberSky" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#b5302b"/>
+      <stop offset="40%" stop-color="#d95d39"/>
+      <stop offset="75%" stop-color="#e2a73a"/>
+      <stop offset="100%" stop-color="#f3ead7"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="600" fill="url(#emberSky)"/>
+  <circle cx="200" cy="220" r="95" fill="#ffd56b" opacity="0.9"/>
+  <polygon points="-20,380 90,290 190,360 280,270 420,390 420,600 -20,600" fill="#421a14"/>
+  <polygon points="-20,410 140,320 250,420 340,340 420,410 420,600 -20,600" fill="#221a14"/>
+  <polygon points="175,370 225,370 340,600 60,600" fill="#17120e"/>
+  <polygon points="198,370 202,370 205,600 195,600" fill="#ffd56b" opacity="0.8"/>
+  <rect x="16" y="16" width="368" height="568" fill="none" stroke="#221a14" stroke-width="4"/>
+  <rect x="22" y="22" width="356" height="556" fill="none" stroke="#221a14" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <rect x="36" y="36" width="328" height="30" fill="#221a14"/>
+  <text x="200" y="56" font-family="'Courier New', monospace" font-size="12" font-weight="900" fill="#ffd56b" text-anchor="middle" letter-spacing="4">★ CINEBOOK RETRO ★</text>
+  <text x="200" y="130" font-family="'Impact', sans-serif" font-size="48" font-weight="900" fill="#221a14" text-anchor="middle" letter-spacing="2">EMBER ROAD</text>
+  <text x="200" y="152" font-family="'Courier New', monospace" font-size="12" font-weight="bold" fill="#421a14" text-anchor="middle" letter-spacing="2">ACROSS THE ASHES OF A FALLEN CITY</text>
+  <rect x="120" y="534" width="160" height="26" fill="#b5302b" rx="4"/>
+  <text x="200" y="551" font-family="'Courier New', monospace" font-size="11" font-weight="900" fill="#f3ead7" text-anchor="middle" letter-spacing="2">ACTION / ADVENTURE</text>
+</svg>

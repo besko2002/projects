@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" width="100%" height="100%">
+  <defs>
+    <radialGradient id="starAnomaly" cx="50%" cy="45%" r="50%">
+      <stop offset="0%" stop-color="#ec4899"/>
+      <stop offset="40%" stop-color="#6366f1"/>
+      <stop offset="80%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#0f0d25"/>
+    </radialGradient>
+  </defs>
+  <rect width="400" height="600" fill="url(#starAnomaly)"/>
+  <circle cx="200" cy="270" r="80" fill="none" stroke="#ffd56b" stroke-width="3" stroke-dasharray="12,8"/>
+  <circle cx="200" cy="270" r="120" fill="none" stroke="#38bdf8" stroke-width="1.5" opacity="0.6"/>
+  <polygon points="190,260 210,260 215,280 185,280" fill="#ffffff"/>
+  <rect x="16" y="16" width="368" height="568" fill="none" stroke="#6366f1" stroke-width="4"/>
+  <rect x="22" y="22" width="356" height="556" fill="none" stroke="#ec4899" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <rect x="36" y="36" width="328" height="30" fill="#0f0d25"/>
+  <text x="200" y="56" font-family="'Courier New', monospace" font-size="12" font-weight="900" fill="#ffd56b" text-anchor="middle" letter-spacing="4">★ BEYOND THE EVENT HORIZON ★</text>
+  <text x="200" y="125" font-family="'Impact', sans-serif" font-size="40" font-weight="900" fill="#ffd56b" text-anchor="middle" letter-spacing="3">SOLARIS</text>
+  <text x="200" y="165" font-family="'Impact', sans-serif" font-size="44" font-weight="900" fill="#ec4899" text-anchor="middle" letter-spacing="3">DRIFT</text>
+  <rect x="120" y="534" width="160" height="26" fill="#4338ca" rx="4"/>
+  <text x="200" y="551" font-family="'Courier New', monospace" font-size="11" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="2">SCI-FI / DRAMA</text>
+</svg>

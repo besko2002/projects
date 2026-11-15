@@ -23,7 +23,8 @@ export function SeatSelectionPage(): React.JSX.Element {
   const isInvalidId = !Number.isInteger(scheduleId) || scheduleId <= 0;
 
   const navigate = useNavigate();
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, isLoading: authLoading, demoStatus, loginDemo = async () => {} } = useAuth();
+  const [isDemoInPlaceLoading, setIsDemoInPlaceLoading] = useState<boolean>(false);
 
   const [schedule, setSchedule] = useState<ScheduleDto | null>(null);
   const [seats, setSeats] = useState<SeatDto[]>([]);
@@ -72,7 +73,7 @@ export function SeatSelectionPage(): React.JSX.Element {
       .then(([schedData, mapData]) => {
         if (!ignore) {
           setSchedule(schedData);
-          setSeats(mapData.seats);
+          setSeats(mapData?.seats || []);
           setBaseLoading(false);
 
           // Restore previously saved seats from registration / login redirect
@@ -106,7 +107,7 @@ export function SeatSelectionPage(): React.JSX.Element {
     try {
       const mapData = await seatsApi.getSeatMap(scheduleId);
       if (isMountedRef.current) {
-        setSeats(mapData.seats);
+        setSeats(mapData?.seats || []);
       }
     } catch {
       // Ignore map reload error
@@ -545,6 +546,18 @@ export function SeatSelectionPage(): React.JSX.Element {
     }
   };
 
+  const handleInPlaceDemo = async () => {
+    setIsDemoInPlaceLoading(true);
+    setError(null);
+    try {
+      await loginDemo();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start demo session');
+    } finally {
+      setIsDemoInPlaceLoading(false);
+    }
+  };
+
   if (isInvalidId || (!baseLoading && !schedule && error)) {
     return (
       <div className="screen screen-container">
@@ -765,6 +778,19 @@ export function SeatSelectionPage(): React.JSX.Element {
                   ? 'Continue to secure payment'
                   : 'Sign in to reserve seats'}
               </button>
+
+              {!user && demoStatus?.enabled && selectedSeats.length > 0 && (
+                <button
+                  type="button"
+                  className="btn teal btn-compact"
+                  disabled={isSubmitting || isDemoInPlaceLoading}
+                  onClick={handleInPlaceDemo}
+                  style={{ width: '100%', marginTop: 'var(--space-2)' }}
+                  aria-label="Start demo customer session and hold seats"
+                >
+                  {isDemoInPlaceLoading ? 'Starting session…' : '⚡ Try demo & hold seats in 1 click'}
+                </button>
+              )}
 
               <p className="soft" style={{ fontSize: '13px', lineHeight: 1.5, textAlign: 'center' }}>
                 Secure payment by Stripe · free cancellation until 2 hours before the show

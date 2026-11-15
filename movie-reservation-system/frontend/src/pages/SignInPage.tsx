@@ -10,12 +10,32 @@ export function SignInPage(): React.JSX.Element {
   const rawReturnUrl = searchParams.get('return');
   const returnUrl = sanitizeReturnUrl(rawReturnUrl);
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, loginDemo = async () => {}, demoStatus } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDemoSubmitting, setIsDemoSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleDemoSignIn = async () => {
+    setError(null);
+    setIsDemoSubmitting(true);
+    try {
+      await loginDemo();
+      navigate(returnUrl);
+    } catch (err) {
+      if (err instanceof ApiException) {
+        setError(err.message || 'Failed to create demo session.');
+      } else if (err instanceof Error) {
+        setError(err.message || 'Failed to create demo session.');
+      } else {
+        setError('An unexpected error occurred creating demo session.');
+      }
+    } finally {
+      setIsDemoSubmitting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,12 +104,34 @@ export function SignInPage(): React.JSX.Element {
             <button
               type="submit"
               className="btn red"
-              disabled={isSubmitting || !email || !password}
+              disabled={isSubmitting || isDemoSubmitting || !email || !password}
               style={{ width: '100%', marginTop: 'var(--space-2)' }}
             >
               {isSubmitting ? 'Signing in...' : 'Sign in'}
             </button>
           </form>
+
+          {demoStatus?.enabled && (
+            <div className="demo-signin-card" style={{ marginTop: 'var(--space-6)', padding: 'var(--space-4)', background: 'var(--sand-light, #fbf7ee)', border: '2px dashed var(--teal)', borderRadius: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <span className="stamp" style={{ background: 'var(--teal)', color: '#fff', fontSize: '11px', padding: '2px 6px' }}>PORTFOLIO DEMO</span>
+                <strong style={{ fontSize: '14px' }}>Reviewer One-Click Access</strong>
+              </div>
+              <p className="soft" style={{ fontSize: '13px', margin: '0 0 var(--space-3) 0', lineHeight: 1.4 }}>
+                Reviewing CineBook? Start an isolated, temporary customer session without a password.
+              </p>
+              <button
+                type="button"
+                className="btn teal"
+                onClick={handleDemoSignIn}
+                disabled={isDemoSubmitting || isSubmitting}
+                style={{ width: '100%' }}
+                aria-label="Try demo session without password"
+              >
+                {isDemoSubmitting ? 'Creating session…' : '⚡ Try demo in 1 click'}
+              </button>
+            </div>
+          )}
 
           <div style={{ textAlign: 'center', marginTop: 'var(--space-6)', fontSize: '14px' }}>
             <span className="soft">Don&apos;t have an account? </span>

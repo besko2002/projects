@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type { UserDto } from '../types/auth';
+import type { DemoStatus } from '../types/demo';
 import type { LoginPayload, RegisterPayload } from '../api/authApi';
 import * as authApi from '../api/authApi';
 import { ApiException, getToken, setToken, setUnauthorizedHandler } from '../api/client';
@@ -9,6 +10,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const [user, setUser] = useState<UserDto | null>(null);
   const [token, setTokenState] = useState<string | null>(getToken());
   const [isLoading, setIsLoading] = useState<boolean>(() => !!getToken());
+  const [demoStatus, setDemoStatus] = useState<DemoStatus | null>(null);
 
   const refreshUser = useCallback(async () => {
     const requestToken = getToken();
@@ -80,6 +82,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
         });
     }
 
+    const statusPromise = authApi.getDemoStatus?.();
+    if (statusPromise && typeof statusPromise.then === 'function') {
+      statusPromise
+        .then((status) => {
+          if (!ignore && status) {
+            setDemoStatus(status);
+          }
+        })
+        .catch(() => {
+          if (!ignore) {
+            setDemoStatus({ enabled: false, banner: null, stripeMode: null });
+          }
+        });
+    }
+
     return () => {
       ignore = true;
     };
@@ -107,6 +124,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     }
   };
 
+  const handleLoginDemo = async () => {
+    setIsLoading(true);
+    try {
+      const res = await authApi.createDemoSession();
+      setTokenState(res.accessToken);
+      setUser(res.user);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await authApi.logout();
@@ -126,8 +154,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
         user,
         token,
         isLoading,
+        demoStatus,
         login: handleLogin,
         register: handleRegister,
+        loginDemo: handleLoginDemo,
         logout: handleLogout,
         refreshUser,
       }}

@@ -64,6 +64,10 @@ public class AuthRateLimiter {
         increment("register:" + ip, registrations, true);
     }
 
+    public void demoSession(String ip, int limit) {
+        increment("demo:" + ip, limit, true);
+    }
+
     private void increment(String key, int limit, boolean rejectBeforeIncrement) {
         long now = clock.millis();
         Window state = windows.compute(key, (unused, old) -> {
@@ -73,7 +77,10 @@ public class AuthRateLimiter {
             return new Window(old.startedAt, Math.min(old.count + 1, limit + 1));
         });
         if (rejectBeforeIncrement && state.count > limit) {
-            throw new TooManyRequestsException("Too many registration attempts; try again later");
+            String message = key.startsWith("demo:")
+                    ? "Too many demo sessions created; please wait a moment and try again"
+                    : "Too many registration attempts; try again later";
+            throw new TooManyRequestsException(message);
         }
         // Expired keys are pruned periodically so arbitrary email probes cannot grow this map forever.
         if (requests.incrementAndGet() % 128 == 0) {

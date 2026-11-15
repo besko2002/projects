@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" width="100%" height="100%">
+  <defs>
+    <linearGradient id="jazzGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#431407"/>
+      <stop offset="40%" stop-color="#7c2d12"/>
+      <stop offset="80%" stop-color="#c2410c"/>
+      <stop offset="100%" stop-color="#1c1917"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="600" fill="url(#jazzGrad)"/>
+  <!-- Crescent moon -->
+  <path d="M220,190 A60,60 0 1 0 280,250 A50,50 0 1 1 220,190 Z" fill="#ffd56b"/>
+  <!-- Saxophone vector motif -->
+  <path d="M170,260 C170,320 200,360 230,360 C250,360 260,340 260,310 L270,310 C270,355 245,375 220,375 C185,375 155,330 155,260 Z" fill="#e2a73a"/>
+  <circle cx="270" cy="295" r="16" fill="#ffd56b"/>
+  <!-- Musical notes -->
+  <text x="130" y="220" font-size="28" fill="#ffd56b">♪</text>
+  <text x="280" y="180" font-size="34" fill="#f3ead7">♫</text>
+  <rect x="16" y="16" width="368" height="568" fill="none" stroke="#ffd56b" stroke-width="4"/>
+  <rect x="22" y="22" width="356" height="556" fill="none" stroke="#c2410c" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <rect x="36" y="36" width="328" height="30" fill="#1c1917"/>
+  <text x="200" y="56" font-family="'Courier New', monospace" font-size="12" font-weight="900" fill="#ffd56b" text-anchor="middle" letter-spacing="4">★ PARISIAN JAZZ NIGHTS ★</text>
+  <text x="200" y="115" font-family="'Impact', sans-serif" font-size="38" font-weight="900" fill="#ffd56b" text-anchor="middle" letter-spacing="2">MIDNIGHT</text>
+  <text x="200" y="150" font-family="'Impact', sans-serif" font-size="42" font-weight="900" fill="#f3ead7" text-anchor="middle" letter-spacing="3">ENCORE</text>
+  <rect x="120" y="534" width="160" height="26" fill="#b45309" rx="4"/>
+  <text x="200" y="551" font-family="'Courier New', monospace" font-size="11" font-weight="900" fill="#fef3c7" text-anchor="middle" letter-spacing="2">ROMANCE / DRAMA</text>
+</svg>

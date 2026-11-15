@@ -20,6 +20,17 @@ public class SecurityConfig {
 
     /** Endpoints reachable without a token. */
     private static final String[] PUBLIC_GET_PATHS = {
+            "/",
+            "/login",
+            "/register",
+            "/tickets",
+            "/movie/**",
+            "/book/**",
+            "/posters/**",
+            "/assets/**",
+            "/favicon.ico",
+            "/index.html",
+            "/api/demo/status",
             "/api/movies/**",
             "/api/genres/**",
             "/api/theaters/**",
@@ -29,6 +40,7 @@ public class SecurityConfig {
     private static final String[] PUBLIC_PATHS = {
             "/api/auth/login",
             "/api/auth/register",
+            "/api/demo/session",
             "/payment/success",
             "/payment/cancel",
             "/actuator/health",

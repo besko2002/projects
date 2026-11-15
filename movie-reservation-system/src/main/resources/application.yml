@@ -74,6 +74,9 @@ app:
     email: ${ADMIN_EMAIL:admin@cinema.local}
     password: ${ADMIN_PASSWORD:Admin@12345}
     name: ${ADMIN_NAME:System Admin}
+  demo:
+    enabled: ${DEMO_MODE_ENABLED:false}
+    rate-limit-per-minute: ${DEMO_RATE_LIMIT_PER_MINUTE:15}
 
 management:
   endpoints:
