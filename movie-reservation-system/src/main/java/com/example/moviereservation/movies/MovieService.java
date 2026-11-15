@@ -268,4 +268,9 @@ public class MovieService {
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
     }
+
+    @Transactional(readOnly = true)
+    public long count() {
+        return movieRepository.count();
+    }
 }

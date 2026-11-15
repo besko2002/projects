@@ -3,8 +3,8 @@ package com.example.moviereservation.movies;
 /** Validation constants shared by the movie request payloads. */
 final class MovieValidation {
 
-    /** Absolute http/https URL with a host and no whitespace. */
-    static final String URL_PATTERN = "^https?://[^\\s/?#]+[^\\s]*$";
+    /** Absolute http/https URL with a host and no whitespace, or same-origin /posters/ path. */
+    static final String URL_PATTERN = "^(https?://[^\\s/?#]+[^\\s]*|/posters/[^\\s]+)$";
 
     static final String URL_MESSAGE = "posterUrl must be a valid http or https URL";
 

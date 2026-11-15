@@ -16,7 +16,7 @@ import java.util.Set;
  *
  * @param title           movie title, required
  * @param description     synopsis, optional
- * @param posterUrl       absolute http(s) poster URL, optional
+ * @param posterUrl       absolute http(s) poster URL or same-origin /posters/ path, optional
  * @param durationMinutes running time in minutes, 1..600
  * @param releaseDate     release date, optional
  * @param genreIds        ids of existing genres; may be empty but every id must exist
