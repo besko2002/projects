@@ -35,3 +35,30 @@
 - `node /Users/god_fatheer/.hermes/cache/scratch/hr-track-capture.mjs`: real Chromium + isolated Vite on 5186; all nine screenshots regenerated with fictional intercepted API data, zero capture errors/alerts. Only `hr-attendance-repair.png` changed bytes.
 - Visually inspected attendance repair and password recovery screenshots. Repair shows November 2026, November 10 session 07:00–15:00 UTC, 8h worked matching the row and zero absent/missing checkout days; no clipping. Password recovery panel remains legible and contains no credentials.
 - `npm test -- --run`: 229 passed; `npm run lint`, `git diff --check`: passed. Evidence: scratch `hr-h4-red.log`, `hr-h4-green.log`, `hr-h4-capture.log`, `hr-h4-frontend.log`. Live 8091/5175 untouched; isolated Vite closed in finally.
+
+## H5 — final HR checkpoint
+
+All section 1.5 checks ran successfully on the H1–H4 revision. Commands and results:
+
+| Check | Exact command / execution | Result |
+| --- | --- | --- |
+| Frontend | In `hr-management-system/frontend`: `npm run build && npm run lint && npm test -- --run && npm audit --omit=dev --audit-level=low && npm audit` | Build/lint exit 0; 229 tests passed; both audits report 0 vulnerabilities |
+| Screenshot fixture regression | `node --test scripts/capture-docs.test.mjs` | 4 passed |
+| Native backend | `python3 /Users/god_fatheer/.hermes/cache/scratch/hr-track-run.py h5-backend` | 637 tests, 0 failures/errors/skips; Redis suite explicitly excluded |
+| Fresh isolated JAR | `python3 /Users/god_fatheer/.hermes/cache/scratch/hr-track-package.py` → `./mvnw -B -q -DskipTests package` | Exit 0, new copy `hr-track-final-faaf84e7/hr-management-system`, no live JAR rebuild |
+| Real browser | `node /Users/god_fatheer/.hermes/cache/scratch/hr-track-browser.mjs` | All 9 existing Playwright tests passed; finalized payroll PDF `%PDF-` and XLSX `PK` signatures passed |
+| HR-1 throttled real network | Same browser runner additionally invokes `hr-track-clock-probe.mjs` | Check-in and check-out each send exactly one real POST; success toast shown while button remains disabled; no 409; next action enabled after deferred real GET response |
+| HR-2 old-token promotion/demotion | Included in the 637 backend tests (`EmployeePasswordResetIntegrationTest`) | Old token gets explicit 401 sign-in instruction; fresh promoted token resets successfully; fresh demoted token gets 403 |
+
+### Red/green browser evidence
+
+The browser probe was also run against an isolated frontend mutation removing only `await` from the attendance reload. All nine older E2E tests still passed, but the new throttled check failed: expected disabled, received enabled. The copy was restored in `finally`. Re-running fixed source passed both throttled directions. Logs: scratch `hr-h5-browser-red.log` and `hr-h5-browser-green.log`; visual evidence `hr-h5-clock-deferred.png` inspected (success toast, disabled checking-in button, no error banner).
+
+### Isolation, cleanup, and limits
+
+- The supplied `.native/test-hr-native.py` was reviewed, then executed through a scratch adaptation changing only the build root and optional test selector. The exact original command was **not** run against the live source/build directory. Generated `hr_test_<uuid>` databases only; backend source/classes and backend mutation experiments stay in isolated copies. Earlier frontend unit-test historical mutations used try/finally restoration of the owned HR files; the final browser mutation used only the isolated frontend copy. Redis-only integration suite remains excluded; no Docker started.
+- The supplied `.native/hr-fixes-browser.mjs` was reviewed and copied to scratch. Changes point ROOT/JAR to the fresh copy and logs/snapshots to scratch, plus the throttled probe. It ran native API 8092 and UI 5176 with generated `hr_review_*` databases. Both red and green browser databases were dropped; isolated ports 8092/5176/5186 are free after cleanup.
+- Real-service evidence: native PostgreSQL integration tests, Chromium against actual HTTP API, PDF/XLSX endpoints, delayed real attendance GET and real POSTs. Doubles: jsdom frontend fetch fixtures, synthetic SQLSTATE for exception-mapping unit test, screenshot API fixtures/browser-double calendar test. Screenshots themselves were rendered in real Chromium.
+- Existing live listeners on 8091/5175 retained PIDs 25349/25382 through isolated browser verification. No saved-database start/migration, application restart, push, or other-project edits.
+- Frontend tests exit successfully but emit Node's experimental localStorage warning and jsdom's unimplemented navigation diagnostics. These are disclosed, not described as pristine output. Backend Redis behavior and payroll rates' legal suitability are not certified.
+- Scoped self-review and `git diff --check` passed. Independent review is left to the parent/owner checkpoint. Stop here; CineBook and microservices were not touched.
