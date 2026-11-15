@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Jwts;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -19,6 +20,7 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.time.Instant;
 import java.util.Date;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -181,6 +183,43 @@ class GoogleAuthIntegrationTest {
 
         assertThat(capturedEmails.googleReplacedNotifications).containsExactly(email);
         assertThat(userRepository.findById(initial.getId()).orElseThrow().getPasswordHash()).isNull();
+    }
+
+    @RepeatedTest(5)
+    void concurrentFirstGoogleSignUpsForOneEmailNeverAnswer500() throws Exception {
+        String sub = "google-sub-race-" + System.nanoTime();
+        String email = "race-" + System.nanoTime() + "@cinema.test";
+        String body = objectMapper.writeValueAsString(new GoogleAuthRequest(validToken(sub, email, "Race Patron")));
+        int threads = 8;
+        java.util.concurrent.CyclicBarrier start = new java.util.concurrent.CyclicBarrier(threads);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        try {
+            List<java.util.concurrent.Future<Integer>> results = new java.util.ArrayList<>();
+            for (int i = 0; i < threads; i++) {
+                // A distinct client address per request keeps the per-IP Google limit out of the way.
+                String clientIp = "198.18." + (System.nanoTime() % 250) + "." + (i + 1);
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return mockMvc.perform(post("/api/auth/google")
+                                    .with(request -> {
+                                        request.setRemoteAddr(clientIp);
+                                        return request;
+                                    })
+                                    .contentType(MediaType.APPLICATION_JSON)
+                                    .content(body))
+                            .andReturn().getResponse().getStatus();
+                }));
+            }
+            List<Integer> statuses = new java.util.ArrayList<>();
+            for (java.util.concurrent.Future<Integer> result : results) {
+                statuses.add(result.get(60, java.util.concurrent.TimeUnit.SECONDS));
+            }
+            assertThat(statuses).as("statuses %s", statuses).allMatch(code -> code == 200 || code == 409);
+            assertThat(statuses).contains(200);
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(userRepository.findByGoogleSub(sub)).isPresent();
     }
 
     @Test
