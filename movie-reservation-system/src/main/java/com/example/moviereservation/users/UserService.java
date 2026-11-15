@@ -4,15 +4,20 @@ import com.example.moviereservation.common.BadRequestException;
 import com.example.moviereservation.common.ConflictException;
 import com.example.moviereservation.common.ResourceNotFoundException;
 import com.example.moviereservation.security.JwtService;
+import com.example.moviereservation.users.email.EmailSender;
 import com.example.moviereservation.users.google.GoogleTokenPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
@@ -37,15 +42,25 @@ public class UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final ObjectProvider<EmailSender> emailSenderProvider;
 
     /** Checked against when the email is unknown, so both failure paths cost one BCrypt comparison. */
     private final String dummyPasswordHash;
 
-    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService) {
+    @Autowired
+    public UserService(UserRepository userRepository,
+                       PasswordEncoder passwordEncoder,
+                       JwtService jwtService,
+                       ObjectProvider<EmailSender> emailSenderProvider) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.emailSenderProvider = emailSenderProvider;
         this.dummyPasswordHash = passwordEncoder.encode("dummy-password-for-timing-equalisation");
+    }
+
+    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService) {
+        this(userRepository, passwordEncoder, jwtService, null);
     }
 
     /** Creates a {@link Role#USER} account and returns a freshly issued token. */
@@ -118,14 +133,40 @@ public class UserService {
                     throw new ConflictException("An account with this email is already linked to a different Google account");
                 }
                 // Pre-hijack defense (CB-1): if the account had a password, clear it and revoke existing sessions
-                if (user.getPasswordHash() != null) {
+                boolean hadPassword = user.getPasswordHash() != null;
+                if (hadPassword) {
                     user.setPasswordHash(null);
                     user.revokeTokens();
                     log.info("Cleared password and revoked sessions on Google link for user id={}", user.getId());
+                    String targetEmail = user.getEmail();
+                    if (emailSenderProvider != null && emailSenderProvider.getIfAvailable() != null) {
+                        EmailSender sender = emailSenderProvider.getIfAvailable();
+                        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                                @Override
+                                public void afterCommit() {
+                                    try {
+                                        sender.sendPasswordReplacedByGoogleNotification(targetEmail);
+                                    } catch (Exception ex) {
+                                        log.warn("Failed to dispatch password replaced notification to {}: {}", targetEmail, ex.getMessage());
+                                    }
+                                }
+                            });
+                        } else {
+                            try {
+                                sender.sendPasswordReplacedByGoogleNotification(targetEmail);
+                            } catch (Exception ex) {
+                                log.warn("Failed to dispatch password replaced notification to {}: {}", targetEmail, ex.getMessage());
+                            }
+                        }
+                    }
                 }
                 user.setGoogleSub(payload.sub());
                 user = userRepository.saveAndFlush(user);
                 log.info("Linked existing user id={} to Google sub={}", user.getId(), payload.sub());
+                if (hadPassword) {
+                    return issueToken(user, "Your CineBook account was linked with Google. For security, your previous password was cleared and other active sessions were logged out. You can sign in with Google or use 'Forgot password' anytime if you need to set a password again.");
+                }
             } else {
                 // 3. Create new user account with Role.USER (strictly never ADMIN)
                 String name = (payload.name() != null && !payload.name().isBlank())
@@ -196,9 +237,13 @@ public class UserService {
     }
 
     private AuthResponse issueToken(User user) {
+        return issueToken(user, null);
+    }
+
+    private AuthResponse issueToken(User user, String notice) {
         String token = jwtService.generateToken(user.getId(), user.getEmail(), user.getRole().name(),
                 user.getTokenVersion());
-        return AuthResponse.of(token, jwtService.getExpirationSeconds(), UserDto.from(user));
+        return AuthResponse.of(token, jwtService.getExpirationSeconds(), UserDto.from(user), notice);
     }
 
     private static boolean exceedsBcryptLimit(String rawPassword) {

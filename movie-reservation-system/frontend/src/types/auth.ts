@@ -10,4 +10,5 @@ export interface AuthResponse {
   tokenType: string;
   expiresIn: number;
   user: UserDto;
+  notice?: string;
 }

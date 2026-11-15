@@ -11,6 +11,8 @@ export interface AuthContextValue {
   loginWithGoogle?: (idToken: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  notice?: string | null;
+  dismissNotice?: () => void;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
@@ -24,6 +26,8 @@ const DEFAULT_AUTH_CONTEXT: AuthContextValue = {
   loginWithGoogle: async () => {},
   logout: async () => {},
   refreshUser: async () => {},
+  notice: null,
+  dismissNotice: () => {},
 };
 
 export function useAuth(): AuthContextValue {

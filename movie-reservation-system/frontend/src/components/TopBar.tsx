@@ -12,6 +12,8 @@ export function TopBar({ searchQuery, onSearchChange, step }: TopBarProps): Reac
   const auth = useContext(AuthContext);
   const user = auth?.user ?? null;
   const logout = auth?.logout ?? (async () => {});
+  const notice = auth?.notice ?? null;
+  const dismissNotice = auth?.dismissNotice;
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -24,7 +26,8 @@ export function TopBar({ searchQuery, onSearchChange, step }: TopBarProps): Reac
   };
 
   return (
-    <header className="top top-bar" role="banner">
+    <>
+      <header className="top top-bar" role="banner">
       <Link to="/" className="sign" aria-label="CineBook Home">
         CINEBOOK
       </Link>
@@ -121,5 +124,32 @@ export function TopBar({ searchQuery, onSearchChange, step }: TopBarProps): Reac
         )}
       </div>
     </header>
+    {notice && (
+      <aside
+        className="info-banner"
+        role="status"
+        style={{
+          margin: 'var(--space-2) var(--space-4)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 'var(--space-3)',
+        }}
+      >
+        <span>{notice}</span>
+        {dismissNotice && (
+          <button
+            type="button"
+            onClick={dismissNotice}
+            className="btn-out"
+            style={{ padding: '2px 8px', fontSize: '12px', whiteSpace: 'nowrap' }}
+            aria-label="Dismiss notice"
+          >
+            Dismiss
+          </button>
+        )}
+      </aside>
+    )}
+  </>
   );
 }

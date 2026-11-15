@@ -186,6 +186,7 @@ public class PasswordResetService {
         // Mark token as used immediately
         token.setUsed(true);
         tokenRepository.saveAndFlush(token);
+        tokenRepository.invalidateAllForUser(token.getUser().getId());
 
         User user = token.getUser();
         user.setPasswordHash(passwordEncoder.encode(newPassword));

@@ -38,6 +38,24 @@ class ResendEmailSenderTest {
     }
 
     @Test
+    void unconfiguredWhenMailFromHasDisplayNameWithLocalDomain() {
+        ResendEmailSender sender = new ResendEmailSender("re_test_123", "CineBook <noreply@cinebook.local>", objectMapper);
+        assertThat(sender.isConfigured()).isFalse();
+
+        ResendEmailSender customLocal = new ResendEmailSender("re_test_123", "Support <tickets@theatre.local>", objectMapper);
+        assertThat(customLocal.isConfigured()).isFalse();
+    }
+
+    @Test
+    void configuredWhenMailFromHasDisplayNameWithValidDomain() {
+        ResendEmailSender sender = new ResendEmailSender("re_test_123", "CineBook <onboarding@resend.dev>", objectMapper);
+        assertThat(sender.isConfigured()).isTrue();
+
+        ResendEmailSender custom = new ResendEmailSender("re_test_123", "CineBook Box Office <tickets@cinebook.com>", objectMapper);
+        assertThat(custom.isConfigured()).isTrue();
+    }
+
+    @Test
     void configuredWhenApiKeyAndValidSenderDomainProvided() {
         ResendEmailSender sender = new ResendEmailSender("re_test_123", "onboarding@resend.dev", objectMapper);
         assertThat(sender.isConfigured()).isTrue();

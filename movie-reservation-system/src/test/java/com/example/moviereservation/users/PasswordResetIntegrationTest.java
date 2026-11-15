@@ -70,6 +70,9 @@ class PasswordResetIntegrationTest {
     @Autowired
     private JwtService jwtService;
 
+    @Autowired
+    private org.springframework.transaction.support.TransactionTemplate transactionTemplate;
+
     @TestConfiguration
     static class TestEmailConfig {
         @Bean
@@ -88,6 +91,7 @@ class PasswordResetIntegrationTest {
     static class CapturedEmailSender implements EmailSender {
         final Map<String, String> resetLinks = new ConcurrentHashMap<>();
         final List<String> notifications = new ArrayList<>();
+        final List<String> googleReplacedNotifications = new ArrayList<>();
         volatile boolean failOnSend = false;
 
         @Override
@@ -106,6 +110,11 @@ class PasswordResetIntegrationTest {
         @Override
         public void sendPasswordChangedNotification(String toEmail) {
             notifications.add(toEmail);
+        }
+
+        @Override
+        public void sendPasswordReplacedByGoogleNotification(String toEmail) {
+            googleReplacedNotifications.add(toEmail);
         }
 
         void clear() {
@@ -419,5 +428,73 @@ class PasswordResetIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new ForgotPasswordRequest(email))))
                 .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    void delayedOlderResetLinkInvalidationDoesNotInvalidateNewerToken() throws Exception {
+        String email = "race-test-" + System.nanoTime() + "@cinema.test";
+        User user = userRepository.saveAndFlush(new User("Race Tester", email, passwordEncoder.encode("Pass@1234"), Role.USER));
+
+        // Generate first reset link
+        mockMvc.perform(post("/api/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ForgotPasswordRequest(email))))
+                .andExpect(status().isOk());
+        String link1 = emailSender.resetLinks.get(email);
+        assertThat(link1).isNotNull();
+        String token1 = link1.substring(link1.indexOf("#token=") + 7);
+
+        // Generate second reset link
+        mockMvc.perform(post("/api/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ForgotPasswordRequest(email))))
+                .andExpect(status().isOk());
+        String link2 = emailSender.resetLinks.get(email);
+        assertThat(link2).isNotNull().isNotEqualTo(link1);
+        String token2 = link2.substring(link2.indexOf("#token=") + 7);
+
+        PasswordResetToken tokenObj1 = tokenRepository.findByTokenHash(PasswordResetService.sha256(token1)).orElseThrow();
+        PasswordResetToken tokenObj2 = tokenRepository.findByTokenHash(PasswordResetService.sha256(token2)).orElseThrow();
+
+        // Simulate request 1's delayed invalidation callback executing AFTER request 2 created token 2
+        transactionTemplate.executeWithoutResult(status ->
+                tokenRepository.invalidatePriorTokensForUser(user.getId(), tokenObj1.getId()));
+
+        // Token 2 must remain valid (not marked used) because tokenObj1.id < tokenObj2.id
+        PasswordResetToken tokenObj2Reloaded = tokenRepository.findById(tokenObj2.getId()).orElseThrow();
+        assertThat(tokenObj2Reloaded.isUsed()).isFalse();
+
+        // New password can be set with token 2
+        mockMvc.perform(post("/api/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ResetPasswordRequest(token2, "NewBrandNewPass@1234"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void successfulPasswordResetInvalidatesAllOtherTokensForUser() throws Exception {
+        String email = "invalidate-all-" + System.nanoTime() + "@cinema.test";
+        User user = userRepository.saveAndFlush(new User("Invalidate Tester", email, passwordEncoder.encode("Pass@1234"), Role.USER));
+
+        // Create two reset tokens directly
+        OffsetDateTime expiresAt = OffsetDateTime.now().plusMinutes(30);
+        PasswordResetToken t1 = tokenRepository.saveAndFlush(new PasswordResetToken(user, PasswordResetService.sha256("rawToken1111"), expiresAt));
+        PasswordResetToken t2 = tokenRepository.saveAndFlush(new PasswordResetToken(user, PasswordResetService.sha256("rawToken2222"), expiresAt));
+
+        // Reset using token 2
+        mockMvc.perform(post("/api/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ResetPasswordRequest("rawToken2222", "NewBrandNewPass@1234"))))
+                .andExpect(status().isOk());
+
+        // Token 1 must now be marked used
+        PasswordResetToken t1Reloaded = tokenRepository.findById(t1.getId()).orElseThrow();
+        assertThat(t1Reloaded.isUsed()).isTrue();
+
+        // Attempting to reset using token 1 is rejected
+        mockMvc.perform(post("/api/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ResetPasswordRequest("rawToken1111", "AnotherPass@9999"))))
+                .andExpect(status().isBadRequest());
     }
 }

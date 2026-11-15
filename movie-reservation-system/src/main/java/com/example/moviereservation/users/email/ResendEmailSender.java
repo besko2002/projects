@@ -52,11 +52,22 @@ public class ResendEmailSender implements EmailSender {
         if (mailFrom == null || mailFrom.isBlank()) {
             return false;
         }
-        String normalizedFrom = mailFrom.trim().toLowerCase(java.util.Locale.ROOT);
-        if (normalizedFrom.equals("noreply@cinebook.local") || normalizedFrom.endsWith(".local") || !normalizedFrom.contains("@")) {
+        String address = mailFrom;
+        int start = address.indexOf('<');
+        int end = address.indexOf('>');
+        if (start != -1 && end > start) {
+            address = address.substring(start + 1, end);
+        }
+        String normalized = address.trim().toLowerCase(java.util.Locale.ROOT);
+        if (normalized.equals("noreply@cinebook.local")
+                || normalized.endsWith(".local")
+                || !normalized.contains("@")
+                || normalized.startsWith("@")
+                || normalized.endsWith("@")) {
             return false;
         }
-        return true;
+        String domain = normalized.substring(normalized.indexOf('@') + 1);
+        return domain.contains(".") && !domain.endsWith(".local");
     }
 
     @Override
@@ -118,6 +129,34 @@ public class ResendEmailSender implements EmailSender {
                 + "</p>"
                 + "<p style=\"font-size:13px;line-height:1.5;color:#857563;\">"
                 + "If you did not perform this change, please contact support immediately."
+                + "</p>"
+                + "</div></body></html>";
+
+        dispatchEmail(toEmail, subject, plainText, html);
+    }
+
+    @Override
+    public void sendPasswordReplacedByGoogleNotification(String toEmail) {
+        if (!isConfigured()) {
+            return;
+        }
+
+        String subject = "CineBook — Account linked with Google";
+        String plainText = "Hello,\n\n"
+                + "Your CineBook account was just linked with Google Sign-In.\n"
+                + "For your security, your prior password was cleared and other active sessions were logged out.\n\n"
+                + "You can now sign in directly with Google. If you ever need to set a password again, please use 'Forgot password' on the sign-in page.\n\n"
+                + "— The CineBook Team";
+
+        String html = "<!DOCTYPE html><html><body style=\"margin:0;padding:24px;background-color:#f3ead7;font-family:sans-serif;color:#221a14;\">"
+                + "<div style=\"max-width:540px;margin:0 auto;background:#fff;border:2px solid #221a14;padding:32px;box-shadow:4px 4px 0 #221a14;\">"
+                + "<h1 style=\"margin-top:0;font-size:24px;letter-spacing:1px;color:#b5302b;text-transform:uppercase;\">CineBook</h1>"
+                + "<h2 style=\"margin:16px 0 8px 0;font-size:18px;\">Account Linked with Google</h2>"
+                + "<p style=\"font-size:14px;line-height:1.6;color:#55483c;\">"
+                + "Your CineBook account was linked with Google Sign-In. For security, your previous password was cleared and active sessions were signed out."
+                + "</p>"
+                + "<p style=\"font-size:13px;line-height:1.5;color:#857563;\">"
+                + "You can now sign in directly with Google, or use 'Forgot password' anytime if you wish to set a new password."
                 + "</p>"
                 + "</div></body></html>";
 

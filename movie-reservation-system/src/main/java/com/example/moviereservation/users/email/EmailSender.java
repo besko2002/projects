@@ -21,4 +21,12 @@ public interface EmailSender {
      * @param toEmail user's email address
      */
     void sendPasswordChangedNotification(String toEmail);
+
+    /**
+     * Sends a security notification informing the user that their account was linked with Google
+     * and their prior password was cleared for security.
+     *
+     * @param toEmail user's email address
+     */
+    void sendPasswordReplacedByGoogleNotification(String toEmail);
 }

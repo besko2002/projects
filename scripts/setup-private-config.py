@@ -32,8 +32,12 @@ def mask_db_url(url: str) -> str:
     if not url:
         return "<not configured>"
     import re
-    # Mask password in URI format postgresql://user:password@host:port/db
-    return re.sub(r'://([^:]+):([^@]+)@', r'://\1:****@', str(url))
+    s = str(url)
+    # Mask authority user:password@ where password may contain @ or special characters
+    s = re.sub(r'(://[^:/\s]+:)(.*)(@[^/\s]+)', r'\1****\3', s)
+    # Also mask query parameters like ?password=... or &password=... or pwd=
+    s = re.sub(r'([?&](?:password|pwd)=)[^&]*', r'\1****', s, flags=re.IGNORECASE)
+    return s
 
 
 def print_status(config: dict):
@@ -118,6 +122,12 @@ def main():
     print(f"\n3. Mail Sender Address (MAIL_FROM) [Current: {current_mail_from or '<unset>'}]")
     new_mail_from = input("   Enter Mail From (e.g. CineBook <boxoffice@yourdomain.com>): ").strip()
     if new_mail_from:
+        addr = new_mail_from
+        if '<' in addr and '>' in addr:
+            addr = addr.split('<')[1].split('>')[0]
+        addr_clean = addr.strip().lower()
+        if addr_clean.endswith('.local') or '@cinebook.local' in addr_clean or not ('.' in addr_clean.split('@')[-1] if '@' in addr_clean else False):
+            print("   ⚠️  Warning: Resend rejects .local or unverified domains. Use a verified domain (or onboarding@resend.dev for testing).")
         config["MAIL_FROM"] = new_mail_from
 
     # App Base URL

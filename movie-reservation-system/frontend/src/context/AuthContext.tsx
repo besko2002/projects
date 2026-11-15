@@ -9,6 +9,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const [user, setUser] = useState<UserDto | null>(null);
   const [token, setTokenState] = useState<string | null>(getToken());
   const [isLoading, setIsLoading] = useState<boolean>(() => !!getToken());
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refreshUser = useCallback(async () => {
     const requestToken = getToken();
@@ -113,6 +114,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       const res = await authApi.loginWithGoogle({ idToken });
       setTokenState(res.accessToken);
       setUser(res.user);
+      if (res.notice) {
+        setNotice(res.notice);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -131,6 +135,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     }
   };
 
+  const dismissNotice = () => {
+    setNotice(null);
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -142,6 +150,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
         loginWithGoogle: handleLoginWithGoogle,
         logout: handleLogout,
         refreshUser,
+        notice,
+        dismissNotice,
       }}
     >
       {children}
