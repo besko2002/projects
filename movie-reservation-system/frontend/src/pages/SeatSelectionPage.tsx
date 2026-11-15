@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { TopBar } from '../components/TopBar';
 import { SeatGrid } from '../components/SeatGrid';
@@ -41,7 +41,6 @@ export function SeatSelectionPage(): React.JSX.Element {
   const [baseLoading, setBaseLoading] = useState<boolean>(!isInvalidId);
   const [ownershipLoaded, setOwnershipLoaded] = useState<boolean>(false);
   const [ownershipError, setOwnershipError] = useState<string | null>(null);
-  const [ownershipRetry, setOwnershipRetry] = useState<number>(0);
 
   const isOwnershipReady = !user || ownershipLoaded;
 
@@ -103,7 +102,122 @@ export function SeatSelectionPage(): React.JSX.Element {
     };
   }, [scheduleId, isInvalidId]);
 
-  // Reconcile user reservations and existing pending tickets (Issue 1, 2, 4)
+  const reloadSeatMap = useCallback(async () => {
+    try {
+      const mapData = await seatsApi.getSeatMap(scheduleId);
+      if (isMountedRef.current) {
+        setSeats(mapData.seats);
+      }
+    } catch {
+      // Ignore map reload error
+    }
+  }, [scheduleId]);
+
+  // Reconcile and apply user reservations, existing pending tickets, and expiries (Issues 1, 2, 4)
+  const applyReconciledReservations = useCallback(
+    (reservations: SeatReservationDto[], isExpiryEvent = false) => {
+      const now = Date.now();
+      const confirmed = reservations.filter(
+        (r) => r.scheduleId === scheduleId && r.status === 'CONFIRMED',
+      );
+      const activeHolds = reservations.filter(
+        (r) =>
+          r.scheduleId === scheduleId &&
+          r.status === 'HELD' &&
+          new Date(r.expiresAt).getTime() > now,
+      );
+
+      setConfirmedSeats(confirmed);
+
+      const map = new Map<number, SeatReservationDto>();
+      let earliestExpiry: number | null = null;
+      let foundTicketId: number | null = null;
+
+      for (const h of activeHolds) {
+        map.set(h.seatId, h);
+        if (h.ticketId != null) {
+          foundTicketId = h.ticketId;
+        }
+        if (h.expiresAt) {
+          const expTime = new Date(h.expiresAt).getTime();
+          if (earliestExpiry === null || expTime < earliestExpiry) {
+            earliestExpiry = expTime;
+          }
+        }
+      }
+
+      setHeldReservations(map);
+      setPendingTicketId(foundTicketId);
+
+      // Reconcile selectedSeatIds:
+      // Drop any previously held seats that are no longer valid on the server;
+      // Keep non-server selections and valid active holds.
+      setSelectedSeatIds((prev) => {
+        const next = new Set<number>();
+        for (const id of prev) {
+          if (heldReservationsRef.current.has(id)) {
+            if (map.has(id)) next.add(id);
+          } else {
+            next.add(id);
+          }
+        }
+        for (const seatId of map.keys()) {
+          next.add(seatId);
+        }
+        return next;
+      });
+
+      const hadPreviousHolds = heldReservationsRef.current.size > 0;
+      const lostHolds = Array.from(heldReservationsRef.current.keys()).some(
+        (id) => !map.has(id),
+      );
+
+      if (earliestExpiry !== null) {
+        setHeldExpiresAt(new Date(earliestExpiry).toISOString());
+        if (isExpiryEvent || lostHolds) {
+          setError('One or more seat holds expired. Your remaining valid holds are kept.');
+        }
+      } else {
+        setHeldExpiresAt(null);
+        if (isExpiryEvent || (hadPreviousHolds && lostHolds)) {
+          setError(
+            'Your seat holds expired and the seats were released. Please select your seats again.',
+          );
+        }
+      }
+
+      setOwnershipLoaded(true);
+      setOwnershipError(null);
+      void reloadSeatMap();
+    },
+    [scheduleId, reloadSeatMap],
+  );
+
+  const reconcileReservations = useCallback(
+    async (isExpiryEvent = false) => {
+      if (!isMountedRef.current || isInvalidId || authLoading || !user) return;
+
+      try {
+        const reservations = await seatsApi.getMyReservations();
+        if (!isMountedRef.current) return;
+        applyReconciledReservations(reservations, isExpiryEvent);
+      } catch (err) {
+        if (!isMountedRef.current) return;
+        setOwnershipLoaded(false);
+        setOwnershipError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to verify existing seat reservations. Please retry.',
+        );
+        if (isExpiryEvent) {
+          setHeldExpiresAt(null);
+        }
+        void reloadSeatMap();
+      }
+    },
+    [authLoading, isInvalidId, user, applyReconciledReservations, reloadSeatMap],
+  );
+
   useEffect(() => {
     let ignore = false;
     if (isInvalidId || authLoading || !user) return;
@@ -111,62 +225,12 @@ export function SeatSelectionPage(): React.JSX.Element {
     seatsApi
       .getMyReservations()
       .then((reservations) => {
-        if (!ignore) {
-          const now = Date.now();
-          const confirmed = reservations.filter(
-            (r) => r.scheduleId === scheduleId && r.status === 'CONFIRMED',
-          );
-          const activeHolds = reservations.filter(
-            (r) =>
-              r.scheduleId === scheduleId &&
-              r.status === 'HELD' &&
-              new Date(r.expiresAt).getTime() > now,
-          );
-
-          setConfirmedSeats(confirmed);
-
-          const map = new Map<number, SeatReservationDto>();
-          let earliestExpiry: number | null = null;
-          let foundTicketId: number | null = null;
-
-          for (const h of activeHolds) {
-            map.set(h.seatId, h);
-            if (h.ticketId != null) {
-              foundTicketId = h.ticketId;
-            }
-            if (h.expiresAt) {
-              const expTime = new Date(h.expiresAt).getTime();
-              if (earliestExpiry === null || expTime < earliestExpiry) {
-                earliestExpiry = expTime;
-              }
-            }
-          }
-
-          setHeldReservations(map);
-          setPendingTicketId(foundTicketId);
-
-          // Reconcile selectedSeatIds to include all active server holds
-          setSelectedSeatIds((prev) => {
-            const next = new Set(prev);
-            for (const seatId of map.keys()) {
-              next.add(seatId);
-            }
-            return next;
-          });
-
-          if (earliestExpiry !== null) {
-            setHeldExpiresAt(new Date(earliestExpiry).toISOString());
-          } else {
-            setHeldExpiresAt(null);
-          }
-
-          setOwnershipLoaded(true);
-          setOwnershipError(null);
+        if (!ignore && isMountedRef.current) {
+          applyReconciledReservations(reservations, false);
         }
       })
       .catch((err) => {
-        if (!ignore) {
-          // Do not silently proceed if ownership cannot be loaded (Issue 2)
+        if (!ignore && isMountedRef.current) {
           setOwnershipLoaded(false);
           setOwnershipError(
             err instanceof Error
@@ -179,7 +243,7 @@ export function SeatSelectionPage(): React.JSX.Element {
     return () => {
       ignore = true;
     };
-  }, [scheduleId, user, authLoading, isInvalidId, ownershipRetry]);
+  }, [scheduleId, user, authLoading, isInvalidId, applyReconciledReservations]);
 
   // Cleanup on unmount: release ONLY loose holds (ticketId == null) if no ticket was created (Issue 3)
   useEffect(() => {
@@ -197,17 +261,6 @@ export function SeatSelectionPage(): React.JSX.Element {
       }
     };
   }, []);
-
-  const reloadSeatMap = async () => {
-    try {
-      const mapData = await seatsApi.getSeatMap(scheduleId);
-      if (isMountedRef.current) {
-        setSeats(mapData.seats);
-      }
-    } catch {
-      // Ignore map reload error
-    }
-  };
 
   // Explicit cancellation of pending checkout (Issue 1)
   const handleCancelPendingCheckout = async (ticketIdToCancel: number) => {
@@ -262,7 +315,7 @@ export function SeatSelectionPage(): React.JSX.Element {
 
   // Toggle seat selection (Issue 1: never deselect if server refused release)
   const handleToggleSeat = async (seat: SeatDto) => {
-    if (isSubmitting || !isOwnershipReady) return;
+    if (isSubmitting || !isOwnershipReady || !!ownershipError) return;
     setError(null);
     setInfoMessage(null);
 
@@ -365,74 +418,17 @@ export function SeatSelectionPage(): React.JSX.Element {
     return sum;
   }, [selectedSeats, heldReservations]);
 
-  // Hold expiry handler: preserve later valid holds, recompute countdown (Issue 4)
+  // Hold expiry handler: delegate to unified reconciliation (Issues 2, 4)
   const handleHoldExpired = async () => {
-    try {
-      if (user) {
-        const reservations = await seatsApi.getMyReservations();
-        const now = Date.now();
-        const validHolds = reservations.filter(
-          (r) =>
-            r.scheduleId === scheduleId &&
-            r.status === 'HELD' &&
-            new Date(r.expiresAt).getTime() > now,
-        );
-        const confirmed = reservations.filter(
-          (r) => r.scheduleId === scheduleId && r.status === 'CONFIRMED',
-        );
-
-        setConfirmedSeats(confirmed);
-
-        const map = new Map<number, SeatReservationDto>();
-        let earliestExpiry: number | null = null;
-        let foundTicketId: number | null = null;
-
-        for (const h of validHolds) {
-          map.set(h.seatId, h);
-          if (h.ticketId != null) foundTicketId = h.ticketId;
-          if (h.expiresAt) {
-            const exp = new Date(h.expiresAt).getTime();
-            if (earliestExpiry === null || exp < earliestExpiry) {
-              earliestExpiry = exp;
-            }
-          }
-        }
-
-        setHeldReservations(map);
-        setPendingTicketId(foundTicketId);
-
-        // Keep valid holds selected, drop expired holds
-        setSelectedSeatIds((prev) => {
-          const next = new Set<number>();
-          for (const id of prev) {
-            if (heldReservationsRef.current.has(id)) {
-              if (map.has(id)) next.add(id);
-            } else {
-              next.add(id);
-            }
-          }
-          return next;
-        });
-
-        if (earliestExpiry !== null) {
-          setHeldExpiresAt(new Date(earliestExpiry).toISOString());
-          setError('One or more seat holds expired. Your remaining valid holds are kept.');
-        } else {
-          setHeldExpiresAt(null);
-          setError('Your seat holds expired and the seats were released. Please select your seats again.');
-        }
-      } else {
-        setHeldExpiresAt(null);
-        setHeldReservations(new Map());
-        setSelectedSeatIds(new Set());
-        setError('Your seat hold expired. Please select your seats again.');
-      }
-      void reloadSeatMap();
-    } catch {
-      // Fallback
+    if (!user) {
       setHeldExpiresAt(null);
+      setHeldReservations(new Map());
+      setSelectedSeatIds(new Set());
+      setError('Your seat hold expired. Please select your seats again.');
       void reloadSeatMap();
+      return;
     }
+    await reconcileReservations(true);
   };
 
   // Proceed to payment (Issues 1, 2, 3)
@@ -615,7 +611,7 @@ export function SeatSelectionPage(): React.JSX.Element {
             <button
               type="button"
               className="btn btn-compact"
-              onClick={() => setOwnershipRetry((r) => r + 1)}
+              onClick={() => void reconcileReservations(false)}
             >
               Retry
             </button>

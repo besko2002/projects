@@ -37,8 +37,8 @@ export function HoldTimer({ expiresAt, onExpire }: HoldTimerProps): React.JSX.El
         if (!announcedThresholdsRef.current.zero) {
           announcedThresholdsRef.current.zero = true;
           setAnnouncement('Your seat hold has expired and seats have been released.');
+          onExpireRef.current();
         }
-        onExpireRef.current();
       }
     };
 

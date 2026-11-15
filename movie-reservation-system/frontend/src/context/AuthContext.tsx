@@ -14,6 +14,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     const requestToken = getToken();
     if (!requestToken) {
       setUser(null);
+      setTokenState(null);
       setIsLoading(false);
       return;
     }
@@ -21,19 +22,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       const me = await authApi.getMe();
       if (getToken() === requestToken) {
         setUser(me);
+        setTokenState(requestToken);
       }
     } catch (err) {
+      // If a newer token was set, ignore this stale failure
+      if (getToken() !== requestToken && getToken() !== null) {
+        return;
+      }
       // An old bootstrap/refresh response must not erase a newer login (Issue 8)
       if (err instanceof ApiException && (err.status === 401 || err.status === 403)) {
-        if (getToken() === requestToken) {
-          setUser(null);
-          setToken(null);
-          setTokenState(null);
-        }
+        setUser(null);
+        setToken(null);
+        setTokenState(null);
       }
       // Keep network/5xx failures recoverable without signing the user out
     } finally {
-      if (getToken() === requestToken) {
+      if (getToken() === requestToken || getToken() === null) {
         setIsLoading(false);
       }
     }
@@ -45,6 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       setUser(null);
       setToken(null);
       setTokenState(null);
+      setIsLoading(false);
     });
 
     const initialToken = getToken();
@@ -53,20 +58,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
         .then((me) => {
           if (!ignore && getToken() === initialToken) {
             setUser(me);
+            setTokenState(initialToken);
             setIsLoading(false);
           }
         })
         .catch((err) => {
-          if (!ignore && getToken() === initialToken) {
-            // Only clear token & session on 401/403 for the matching token (Issue 8)
-            if (err instanceof ApiException && (err.status === 401 || err.status === 403)) {
-              setUser(null);
-              setToken(null);
-              setTokenState(null);
-            }
-            // Preserve user/token on network or 5xx server errors
-            setIsLoading(false);
+          if (ignore) return;
+          // If a newer token was set in the meantime, ignore this stale response completely
+          if (getToken() !== initialToken && getToken() !== null) {
+            return;
           }
+
+          // Only clear token & session on 401/403 for the matching token (Issue 8)
+          if (err instanceof ApiException && (err.status === 401 || err.status === 403)) {
+            setUser(null);
+            setToken(null);
+            setTokenState(null);
+          }
+          // Preserve user/token on network or 5xx server errors, but ALWAYS finish loading
+          setIsLoading(false);
         });
     }
 
@@ -76,15 +86,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   }, []);
 
   const handleLogin = async (payload: LoginPayload) => {
-    const res = await authApi.login(payload);
-    setTokenState(res.accessToken);
-    setUser(res.user);
+    setIsLoading(true);
+    try {
+      const res = await authApi.login(payload);
+      setTokenState(res.accessToken);
+      setUser(res.user);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleRegister = async (payload: RegisterPayload) => {
-    const res = await authApi.register(payload);
-    setTokenState(res.accessToken);
-    setUser(res.user);
+    setIsLoading(true);
+    try {
+      const res = await authApi.register(payload);
+      setTokenState(res.accessToken);
+      setUser(res.user);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -96,6 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       setUser(null);
       setToken(null);
       setTokenState(null);
+      setIsLoading(false);
     }
   };
 
