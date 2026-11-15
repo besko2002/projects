@@ -1,65 +1,95 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router';
-import { useAuth } from '../context/useAuth';
+import { AuthContext } from '../context/useAuth';
 
 interface TopBarProps {
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
+  step?: 1 | 2 | 3 | 4;
 }
 
-export function TopBar({ searchQuery, onSearchChange }: TopBarProps): React.JSX.Element {
-  const { user, logout } = useAuth();
+export function TopBar({ searchQuery, onSearchChange, step }: TopBarProps): React.JSX.Element {
+  const auth = useContext(AuthContext);
+  const user = auth?.user ?? null;
+  const logout = auth?.logout ?? (async () => {});
   const navigate = useNavigate();
 
   const handleLogout = async () => {
-    await logout();
+    try {
+      await logout();
+    } catch {
+      // Ignored
+    }
     navigate('/');
   };
 
   return (
-    <header className="top-bar" role="banner">
-      <Link to="/" className="logo" aria-label="CineBook Home">
-        <div className="logo-mark" aria-hidden="true">▶</div>
-        <span>CineBook</span>
+    <header className="top top-bar" role="banner">
+      <Link to="/" className="sign" aria-label="CineBook Home">
+        CINEBOOK
       </Link>
 
-      <nav className="nav" aria-label="Main Navigation">
-        <NavLink
-          to="/"
-          end
-          className={({ isActive }) => (isActive ? 'on' : '')}
-        >
-          Now showing
-        </NavLink>
-        <NavLink
-          to="/tickets"
-          className={({ isActive }) => (isActive ? 'on' : '')}
-        >
-          My tickets
-        </NavLink>
-      </nav>
+      {step ? (
+        <div className="steps" role="navigation" aria-label="Booking steps">
+          <span className={step > 1 ? 'done' : step === 1 ? 'cur' : 'todo'}>
+            <i>{step > 1 ? '✓' : '1'}</i>
+            Showtime
+          </span>
+          <span className="line" aria-hidden="true" />
+          <span className={step > 2 ? 'done' : step === 2 ? 'cur' : 'todo'}>
+            <i>{step > 2 ? '✓' : '2'}</i>
+            Seats
+          </span>
+          <span className="line" aria-hidden="true" />
+          <span className={step > 3 ? 'done' : step === 3 ? 'cur' : 'todo'}>
+            <i>{step > 3 ? '✓' : '3'}</i>
+            Payment
+          </span>
+          <span className="line" aria-hidden="true" />
+          <span className={step === 4 ? 'cur' : 'todo'}>
+            <i>4</i>
+            Ticket
+          </span>
+        </div>
+      ) : (
+        <>
+          <nav className="nav" aria-label="Main Navigation">
+            <NavLink
+              to="/"
+              end
+              className={({ isActive }) => (isActive ? 'on' : '')}
+            >
+              Now showing
+            </NavLink>
+            <NavLink
+              to="/tickets"
+              className={({ isActive }) => (isActive ? 'on' : '')}
+            >
+              My tickets
+            </NavLink>
+          </nav>
 
-      <div className="top-search" role="search">
-        <span aria-hidden="true" style={{ fontSize: '16px' }}>⌕</span>
-        <input
-          type="search"
-          placeholder="Search movies..."
-          value={searchQuery ?? ''}
-          onChange={(e) => onSearchChange?.(e.target.value)}
-          aria-label="Search movies"
-        />
-      </div>
+          {onSearchChange && (
+            <div className="top-search" role="search">
+              <input
+                type="search"
+                placeholder="Search movies..."
+                value={searchQuery ?? ''}
+                onChange={(e) => onSearchChange(e.target.value)}
+                aria-label="Search movies"
+              />
+            </div>
+          )}
+        </>
+      )}
 
-      <div className="user-area">
+      <div className="user">
         {user ? (
           <>
-            <div className="avatar" title={user.email} aria-hidden="true">
-              {user.name.charAt(0).toUpperCase()}
-            </div>
-            <span style={{ fontWeight: 700 }}>{user.name}</span>
+            <span className="user-name">{user.name}</span>
             <button
               type="button"
-              className="btn btn-ghost btn-compact"
+              className="btn-out"
               onClick={handleLogout}
               aria-label="Sign out of CineBook"
             >
@@ -67,11 +97,11 @@ export function TopBar({ searchQuery, onSearchChange }: TopBarProps): React.JSX.
             </button>
           </>
         ) : (
-          <div className="btn-row">
-            <Link to="/login" className="btn btn-ghost btn-compact">
+          <div className="guest-nav">
+            <Link to="/login" className="btn-out">
               Sign in
             </Link>
-            <Link to="/register" className="btn btn-primary btn-compact">
+            <Link to="/register" className="btn-out btn-register">
               Register
             </Link>
           </div>

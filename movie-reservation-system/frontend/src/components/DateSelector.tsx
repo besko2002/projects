@@ -13,21 +13,20 @@ export function DateSelector({
   onSelectDate,
 }: DateSelectorProps): React.JSX.Element {
   return (
-    <div className="dates" role="group" aria-label="Select showtime date">
+    <div className="days" role="group" aria-label="Select showtime date">
       {days.map((day) => {
         const isSelected = day.dateString === selectedDate;
         return (
           <button
             key={day.dateString}
             type="button"
-            className={`date-btn ${isSelected ? 'on' : ''}`}
+            className={`day date-btn ${isSelected ? 'on' : ''}`}
             onClick={() => onSelectDate(day.dateString)}
             aria-pressed={isSelected}
             aria-label={`${day.dayLabel}, ${day.dayNumber} ${day.monthLabel}`}
           >
-            <small>{day.dayLabel}</small>
+            <span>{day.dayLabel.toUpperCase()}</span>
             <b>{day.dayNumber}</b>
-            <small>{day.monthLabel}</small>
           </button>
         );
       })}

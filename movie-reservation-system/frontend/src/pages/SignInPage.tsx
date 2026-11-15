@@ -3,10 +3,12 @@ import { Link, useNavigate, useSearchParams } from 'react-router';
 import { TopBar } from '../components/TopBar';
 import { useAuth } from '../context/useAuth';
 import { ApiException } from '../api/client';
+import { sanitizeReturnUrl } from '../utils/urlUtils';
 
 export function SignInPage(): React.JSX.Element {
   const [searchParams] = useSearchParams();
-  const returnUrl = searchParams.get('return') || '/';
+  const rawReturnUrl = searchParams.get('return');
+  const returnUrl = sanitizeReturnUrl(rawReturnUrl);
   const navigate = useNavigate();
   const { login } = useAuth();
 
@@ -35,19 +37,24 @@ export function SignInPage(): React.JSX.Element {
   };
 
   return (
-    <div className="screen-container">
+    <div className="screen screen-container">
       <TopBar />
 
       <main className="wrap">
-        <div className="form-card">
-          <h2>Sign in to CineBook</h2>
-          <p className="muted" style={{ fontSize: '14px' }}>
-            Access your bookings and reserve tickets.
+        <div className="form-card" style={{ maxWidth: '480px', margin: 'var(--space-8) auto' }}>
+          <div className="kicker">Box Office Access</div>
+          <h2 style={{ marginTop: 'var(--space-2)' }}>Sign in to CineBook</h2>
+          <p className="soft" style={{ fontSize: '14px', marginTop: 'var(--space-1)' }}>
+            Access your bookings and reserve seats.
           </p>
 
-          {error && <div className="error-banner" role="alert">{error}</div>}
+          {error && (
+            <div className="error-banner" role="alert" style={{ marginTop: 'var(--space-4)' }}>
+              {error}
+            </div>
+          )}
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', marginTop: 'var(--space-6)' }}>
             <div className="form-group">
               <label htmlFor="login-email">Email address</label>
               <input
@@ -76,7 +83,7 @@ export function SignInPage(): React.JSX.Element {
 
             <button
               type="submit"
-              className="btn btn-primary"
+              className="btn red"
               disabled={isSubmitting || !email || !password}
               style={{ width: '100%', marginTop: 'var(--space-2)' }}
             >
@@ -84,9 +91,12 @@ export function SignInPage(): React.JSX.Element {
             </button>
           </form>
 
-          <div style={{ textAlign: 'center', marginTop: 'var(--space-2)', fontSize: '14px' }}>
-            <span className="muted">Don&apos;t have an account? </span>
-            <Link to={`/register${returnUrl ? `?return=${encodeURIComponent(returnUrl)}` : ''}`} style={{ color: 'var(--amber)', fontWeight: 700 }}>
+          <div style={{ textAlign: 'center', marginTop: 'var(--space-6)', fontSize: '14px' }}>
+            <span className="soft">Don&apos;t have an account? </span>
+            <Link
+              to={`/register${returnUrl ? `?return=${encodeURIComponent(returnUrl)}` : ''}`}
+              style={{ color: 'var(--red)', fontWeight: 800, textDecoration: 'underline' }}
+            >
               Register here
             </Link>
           </div>

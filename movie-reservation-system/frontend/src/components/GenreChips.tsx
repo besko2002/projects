@@ -14,13 +14,13 @@ export function GenreChips({
 }: GenreChipsProps): React.JSX.Element {
   return (
     <div
-      style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', marginTop: 'var(--space-3)' }}
+      className="genres"
       role="group"
       aria-label="Filter movies by genre"
     >
       <button
         type="button"
-        className={`chip ${selectedGenre === null ? 'on' : ''}`}
+        className={`tag chip ${selectedGenre === null ? 'on' : ''}`}
         onClick={() => onSelectGenre(null)}
         aria-pressed={selectedGenre === null}
       >
@@ -32,7 +32,7 @@ export function GenreChips({
           <button
             key={g.id}
             type="button"
-            className={`chip ${isSelected ? 'on' : ''}`}
+            className={`tag chip ${isSelected ? 'on' : ''}`}
             onClick={() => onSelectGenre(g.name)}
             aria-pressed={isSelected}
           >

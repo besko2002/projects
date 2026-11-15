@@ -3,10 +3,12 @@ import { Link, useNavigate, useSearchParams } from 'react-router';
 import { TopBar } from '../components/TopBar';
 import { useAuth } from '../context/useAuth';
 import { ApiException } from '../api/client';
+import { sanitizeReturnUrl } from '../utils/urlUtils';
 
 export function RegisterPage(): React.JSX.Element {
   const [searchParams] = useSearchParams();
-  const returnUrl = searchParams.get('return') || '/';
+  const rawReturnUrl = searchParams.get('return');
+  const returnUrl = sanitizeReturnUrl(rawReturnUrl);
   const navigate = useNavigate();
   const { register } = useAuth();
 
@@ -47,19 +49,24 @@ export function RegisterPage(): React.JSX.Element {
   };
 
   return (
-    <div className="screen-container">
+    <div className="screen screen-container">
       <TopBar />
 
       <main className="wrap">
-        <div className="form-card">
-          <h2>Create your CineBook account</h2>
-          <p className="muted" style={{ fontSize: '14px' }}>
+        <div className="form-card" style={{ maxWidth: '480px', margin: 'var(--space-8) auto' }}>
+          <div className="kicker">New Patron Registration</div>
+          <h2 style={{ marginTop: 'var(--space-2)' }}>Create your CineBook account</h2>
+          <p className="soft" style={{ fontSize: '14px', marginTop: 'var(--space-1)' }}>
             Book seats, track orders, and manage refunds easily.
           </p>
 
-          {error && <div className="error-banner" role="alert">{error}</div>}
+          {error && (
+            <div className="error-banner" role="alert" style={{ marginTop: 'var(--space-4)' }}>
+              {error}
+            </div>
+          )}
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', marginTop: 'var(--space-6)' }}>
             <div className="form-group">
               <label htmlFor="register-name">Full name</label>
               <input
@@ -103,7 +110,7 @@ export function RegisterPage(): React.JSX.Element {
 
             <button
               type="submit"
-              className="btn btn-primary"
+              className="btn red"
               disabled={isSubmitting || !name || !email || !password}
               style={{ width: '100%', marginTop: 'var(--space-2)' }}
             >
@@ -111,9 +118,12 @@ export function RegisterPage(): React.JSX.Element {
             </button>
           </form>
 
-          <div style={{ textAlign: 'center', marginTop: 'var(--space-2)', fontSize: '14px' }}>
-            <span className="muted">Already have an account? </span>
-            <Link to={`/login${returnUrl ? `?return=${encodeURIComponent(returnUrl)}` : ''}`} style={{ color: 'var(--amber)', fontWeight: 700 }}>
+          <div style={{ textAlign: 'center', marginTop: 'var(--space-6)', fontSize: '14px' }}>
+            <span className="soft">Already have an account? </span>
+            <Link
+              to={`/login${returnUrl ? `?return=${encodeURIComponent(returnUrl)}` : ''}`}
+              style={{ color: 'var(--red)', fontWeight: 800, textDecoration: 'underline' }}
+            >
               Sign in
             </Link>
           </div>
