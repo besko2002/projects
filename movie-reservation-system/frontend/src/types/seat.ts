@@ -23,7 +23,7 @@ export interface HoldRequest {
 }
 
 export interface HeldSeatItemDto {
-  id: number;
+  reservationId: number;
   seatId: number;
   rowLabel: string;
   seatNumber: number;

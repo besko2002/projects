@@ -1,16 +1,17 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router';
+import { TopBar } from '../components/TopBar';
 import { SeatGrid } from '../components/SeatGrid';
 import { HoldTimer } from '../components/HoldTimer';
 import type { ScheduleDto } from '../types/schedule';
-import type { SeatDto } from '../types/seat';
+import type { SeatDto, SeatReservationDto } from '../types/seat';
 import * as schedulesApi from '../api/schedulesApi';
 import * as seatsApi from '../api/seatsApi';
 import * as ticketsApi from '../api/ticketsApi';
 import { ApiException } from '../api/client';
 import { useAuth } from '../context/useAuth';
 import { formatFullDateTime } from '../utils/dateUtils';
-import { getPosterGradient } from '../utils/posterUtils';
+import { formatMoney } from '../utils/moneyUtils';
 
 const MAX_SEATS_PER_USER = 8;
 const PENDING_TICKET_KEY = 'cinebook_pending_ticket_id';
@@ -19,22 +20,39 @@ const SAVED_SEATS_KEY = 'cinebook_saved_seats';
 export function SeatSelectionPage(): React.JSX.Element {
   const { scheduleId: paramScheduleId } = useParams<{ scheduleId: string }>();
   const scheduleId = Number(paramScheduleId);
+  const isInvalidId = !Number.isInteger(scheduleId) || scheduleId <= 0;
+
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
 
   const [schedule, setSchedule] = useState<ScheduleDto | null>(null);
   const [seats, setSeats] = useState<SeatDto[]>([]);
   const [selectedSeatIds, setSelectedSeatIds] = useState<Set<number>>(new Set());
+
+  // Holds map: seatId -> SeatReservationDto (P1-1)
+  const [heldReservations, setHeldReservations] = useState<Map<number, SeatReservationDto>>(
+    new Map(),
+  );
   const [heldExpiresAt, setHeldExpiresAt] = useState<string | null>(null);
 
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(!isInvalidId);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    isInvalidId ? 'Showtime not found.' : null,
+  );
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
+  // Ref to track holds for cleanup on unmount if no ticket was created (P1-1)
+  const ticketCreatedRef = useRef<boolean>(false);
+  const heldReservationsRef = useRef<Map<number, SeatReservationDto>>(heldReservations);
+  useEffect(() => {
+    heldReservationsRef.current = heldReservations;
+  }, [heldReservations]);
+
+  // Load schedule and seat map
   useEffect(() => {
     let ignore = false;
-    if (!scheduleId) return;
+    if (isInvalidId) return;
 
     Promise.all([
       schedulesApi.getSchedule(scheduleId),
@@ -46,7 +64,7 @@ export function SeatSelectionPage(): React.JSX.Element {
           setSeats(mapData.seats);
           setLoading(false);
 
-          // Restore previously saved seats if returned from sign-in
+          // Restore previously saved seats from registration / login redirect
           try {
             const savedRaw = sessionStorage.getItem(SAVED_SEATS_KEY);
             if (savedRaw) {
@@ -57,13 +75,13 @@ export function SeatSelectionPage(): React.JSX.Element {
               sessionStorage.removeItem(SAVED_SEATS_KEY);
             }
           } catch {
-            // Ignore storage parse issues
+            // Storage parse issue ignored
           }
         }
       })
       .catch((err) => {
         if (!ignore) {
-          setError(err instanceof Error ? err.message : 'Failed to load seats');
+          setError(err instanceof Error ? err.message : 'Showtime not found');
           setLoading(false);
         }
       });
@@ -71,7 +89,72 @@ export function SeatSelectionPage(): React.JSX.Element {
     return () => {
       ignore = true;
     };
-  }, [scheduleId]);
+  }, [scheduleId, isInvalidId]);
+
+  // Load existing user holds for this showtime (P1-1)
+  useEffect(() => {
+    let ignore = false;
+    if (isInvalidId || !user) return;
+
+    seatsApi
+      .getMyReservations()
+      .then((reservations) => {
+        if (!ignore) {
+          const activeHolds = reservations.filter(
+            (r) => r.scheduleId === scheduleId && r.status === 'HELD',
+          );
+
+          if (activeHolds.length > 0) {
+            const map = new Map<number, SeatReservationDto>();
+            let earliestExpiry: number | null = null;
+
+            for (const h of activeHolds) {
+              map.set(h.seatId, h);
+              if (h.expiresAt) {
+                const expTime = new Date(h.expiresAt).getTime();
+                if (earliestExpiry === null || expTime < earliestExpiry) {
+                  earliestExpiry = expTime;
+                }
+              }
+            }
+
+            setHeldReservations(map);
+            setSelectedSeatIds((prev) => {
+              const next = new Set(prev);
+              for (const seatId of map.keys()) {
+                next.add(seatId);
+              }
+              return next;
+            });
+
+            if (earliestExpiry !== null) {
+              setHeldExpiresAt(new Date(earliestExpiry).toISOString());
+            }
+          }
+        }
+      })
+      .catch(() => {
+        // Non-blocking if fails
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [scheduleId, user, isInvalidId]);
+
+  // Cleanup on unmount: release active holds if no ticket was created (P1-1, P3: don't print "Released null")
+  useEffect(() => {
+    return () => {
+      if (!ticketCreatedRef.current) {
+        const toRelease = Array.from(heldReservationsRef.current.values());
+        for (const res of toRelease) {
+          if (res && res.id) {
+            void seatsApi.releaseReservation(res.id).catch(() => {});
+          }
+        }
+      }
+    };
+  }, []);
 
   const reloadSeatMap = async () => {
     try {
@@ -82,51 +165,95 @@ export function SeatSelectionPage(): React.JSX.Element {
     }
   };
 
-  // Toggle seat selection
-  const handleToggleSeat = (seat: SeatDto) => {
+  // Toggle seat selection (P1-1: release deselected ones immediately)
+  const handleToggleSeat = async (seat: SeatDto) => {
     setError(null);
     setInfoMessage(null);
 
-    setSelectedSeatIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(seat.seatId)) {
-        next.delete(seat.seatId);
-      } else {
-        if (next.size >= MAX_SEATS_PER_USER) {
-          setInfoMessage(`You can hold a maximum of ${MAX_SEATS_PER_USER} seats per showtime.`);
-          return prev;
+    const isCurrentlySelected = selectedSeatIds.has(seat.seatId);
+
+    if (isCurrentlySelected) {
+      // If seat is currently held by this user, release it on the backend (P1-1)
+      const existingRes = heldReservations.get(seat.seatId);
+      if (existingRes && existingRes.id) {
+        try {
+          await seatsApi.releaseReservation(existingRes.id);
+          setHeldReservations((prev) => {
+            const next = new Map(prev);
+            next.delete(seat.seatId);
+            return next;
+          });
+        } catch {
+          // If already released, proceed
         }
-        next.add(seat.seatId);
       }
-      return next;
-    });
+
+      setSelectedSeatIds((prev) => {
+        const next = new Set(prev);
+        next.delete(seat.seatId);
+        if (next.size === 0) {
+          setHeldExpiresAt(null);
+        }
+        return next;
+      });
+      void reloadSeatMap();
+    } else {
+      // Compute remaining allowance: 8 minus active reservations (P2-5)
+      const activeResCount = heldReservations.size;
+      const unheldSelectedCount = Array.from(selectedSeatIds).filter(
+        (id) => !heldReservations.has(id),
+      ).length;
+
+      if (activeResCount + unheldSelectedCount >= MAX_SEATS_PER_USER) {
+        setInfoMessage(
+          `You can hold a maximum of ${MAX_SEATS_PER_USER} seats per showtime (remaining allowance: ${Math.max(
+            0,
+            MAX_SEATS_PER_USER - activeResCount,
+          )}).`,
+        );
+        return;
+      }
+
+      setSelectedSeatIds((prev) => {
+        const next = new Set(prev);
+        next.add(seat.seatId);
+        return next;
+      });
+    }
   };
 
-  // Selected seat models
+  // Build selected seat models
   const selectedSeats = useMemo(() => {
     return seats.filter((s) => selectedSeatIds.has(s.seatId));
   }, [seats, selectedSeatIds]);
 
+  // Total price: sync from held reservations when available, else sum selected (P1-2)
   const totalPrice = useMemo(() => {
-    return selectedSeats.reduce((sum, s) => sum + s.price, 0);
-  }, [selectedSeats]);
+    let sum = 0;
+    for (const seat of selectedSeats) {
+      const held = heldReservations.get(seat.seatId);
+      sum += held ? Number(held.price) : Number(seat.price);
+    }
+    return sum;
+  }, [selectedSeats, heldReservations]);
 
-  // Handle countdown expiry
+  // Countdown expiry handler (P1-1)
   const handleHoldExpired = () => {
     setHeldExpiresAt(null);
+    setHeldReservations(new Map());
     setSelectedSeatIds(new Set());
     setError('Your seat hold expired and the seats were released. Please select your seats again.');
     void reloadSeatMap();
   };
 
-  // Hold & Proceed to checkout
+  // Proceed to payment (P1-1, P1-2, P2-5)
   const handleProceed = async () => {
     if (selectedSeatIds.size === 0) {
       setError('Please select at least one seat to continue.');
       return;
     }
 
-    // Guest checkout check
+    // Guest checkout redirect: save selection for return
     if (!user) {
       try {
         sessionStorage.setItem(
@@ -144,20 +271,42 @@ export function SeatSelectionPage(): React.JSX.Element {
       setIsSubmitting(true);
       setError(null);
 
-      // Step 1: Hold seats if not already held with active countdown
-      if (!heldExpiresAt) {
-        const holdRes = await seatsApi.holdSeats(scheduleId, Array.from(selectedSeatIds));
+      // Step 1: Hold any newly selected seats not yet held by this user (P1-2)
+      const unheldSeatIds = Array.from(selectedSeatIds).filter(
+        (id) => !heldReservations.has(id),
+      );
+
+      if (unheldSeatIds.length > 0) {
+        const holdRes = await seatsApi.holdSeats(scheduleId, unheldSeatIds);
         setHeldExpiresAt(holdRes.expiresAt);
+
+        // Update heldReservations map
+        setHeldReservations((prev) => {
+          const next = new Map(prev);
+          for (const item of holdRes.seats) {
+            next.set(item.seatId, {
+              id: item.reservationId,
+              scheduleId,
+              seatId: item.seatId,
+              ticketId: null,
+              price: item.price,
+              status: 'HELD',
+              expiresAt: holdRes.expiresAt,
+            });
+          }
+          return next;
+        });
       }
 
-      // Step 2: Checkout ticket via Stripe gateway
+      // Step 2: Checkout ticket via Stripe gateway (idempotent for current pending)
       const ticketRes = await ticketsApi.checkoutTicket(scheduleId);
+      ticketCreatedRef.current = true;
       sessionStorage.setItem(PENDING_TICKET_KEY, String(ticketRes.ticketId));
 
       if (ticketRes.checkoutUrl) {
         window.location.href = ticketRes.checkoutUrl;
       } else {
-        navigate(`/payment/success`);
+        navigate('/payment/success');
       }
     } catch (err) {
       if (err instanceof ApiException && err.status === 503) {
@@ -165,7 +314,8 @@ export function SeatSelectionPage(): React.JSX.Element {
           'Online payment is currently unavailable (Stripe payment gateway is not configured). Your held seats are preserved.',
         );
       } else if (err instanceof ApiException && err.status === 409) {
-        setError('One or more of your selected seats were just taken. Refreshing available seats...');
+        // P2-5: Show backend's actual error message for 409
+        setError(err.message || 'One or more of your selected seats were just taken.');
         void reloadSeatMap();
       } else {
         setError(err instanceof Error ? err.message : 'An error occurred during checkout.');
@@ -175,189 +325,144 @@ export function SeatSelectionPage(): React.JSX.Element {
     }
   };
 
-  if (loading) {
+  if (isInvalidId || (!loading && !schedule && error)) {
     return (
-      <div className="screen-container">
+      <div className="screen screen-container">
+        <TopBar step={2} />
         <main className="wrap">
-          <div className="skeleton" style={{ height: '500px', borderRadius: 'var(--radius-xl)' }} />
+          <div className="error-banner" role="alert">
+            {error || 'Showtime not found'}
+          </div>
+          <div style={{ marginTop: 'var(--space-6)' }}>
+            <button type="button" className="btn" onClick={() => navigate('/')}>
+              ← Back to movies
+            </button>
+          </div>
         </main>
       </div>
     );
   }
 
-  if (!schedule) {
+  if (loading || authLoading || !schedule) {
     return (
-      <div className="screen-container">
+      <div className="screen screen-container">
+        <TopBar step={2} />
         <main className="wrap">
-          <div className="error-banner">{error || 'Showtime not found'}</div>
+          <div className="skeleton" style={{ height: '520px', border: '3px solid var(--ink)' }} />
         </main>
       </div>
     );
   }
 
-  const gradient = getPosterGradient(schedule.movie.title || schedule.id);
+  const remainingAllowance = Math.max(0, MAX_SEATS_PER_USER - selectedSeatIds.size);
 
   return (
-    <div className="screen-container">
-      {/* Top Bar with Steps */}
-      <header className="top-bar">
-        <button
-          type="button"
-          onClick={() => navigate('/')}
-          className="logo"
-          style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-          aria-label="CineBook Home"
-        >
-          <div className="logo-mark" aria-hidden="true">▶</div>
-          <span>CineBook</span>
-        </button>
-
-        <div className="steps" aria-label="Booking steps" style={{ marginLeft: 'var(--space-6)' }}>
-          <span className="done" style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
-            <span className="dot" aria-hidden="true">✓</span>
-            Showtime
-          </span>
-          <span className="bar" aria-hidden="true" />
-          <span className="cur" style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
-            <span className="dot" aria-hidden="true">2</span>
-            Seats
-          </span>
-          <span className="bar" aria-hidden="true" />
-          <span style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
-            <span className="dot" aria-hidden="true">3</span>
-            Payment
-          </span>
-          <span className="bar" aria-hidden="true" />
-          <span style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
-            <span className="dot" aria-hidden="true">4</span>
-            Ticket
-          </span>
-        </div>
-      </header>
+    <div className="screen screen-container" id="seats">
+      <TopBar step={2} />
 
       <main className="wrap">
-        <h1>Choose your seats</h1>
-        <p className="muted" style={{ marginTop: 'var(--space-1)', fontSize: '15px' }}>
-          {schedule.movie.title} · {schedule.theater.name} · {formatFullDateTime(schedule.startTime)} · up to {MAX_SEATS_PER_USER} seats per person
-        </p>
+        <div className="kicker">
+          {schedule.movie.title} · {schedule.theater.name} · {formatFullDateTime(schedule.startTime)}
+        </div>
+        <h1>Pick your seats</h1>
 
         {error && (
-          <div className="error-banner" style={{ marginTop: 'var(--space-4)' }} role="alert">
+          <div className="error-banner" role="alert" style={{ marginTop: 'var(--space-4)' }}>
             {error}
           </div>
         )}
 
         {infoMessage && (
           <div
+            className="info-banner"
+            role="status"
             style={{
               marginTop: 'var(--space-4)',
-              background: 'rgba(255, 181, 71, 0.1)',
-              border: '1px solid var(--amber)',
-              color: 'var(--amber)',
+              background: '#fff1c9',
+              border: '2px solid var(--ink)',
               padding: 'var(--space-3) var(--space-4)',
-              borderRadius: 'var(--radius-md)',
+              fontWeight: 700,
               fontSize: '14px',
             }}
-            role="status"
           >
             {infoMessage}
           </div>
         )}
 
         <div className="seat-layout">
-          {/* Seat Grid Component */}
-          <SeatGrid
-            seats={seats}
-            selectedSeatIds={selectedSeatIds}
-            onToggleSeat={handleToggleSeat}
-            maxSeatsReached={selectedSeatIds.size >= MAX_SEATS_PER_USER}
-          />
+          {/* Outlined Seat Map Grid with Roving Tabindex */}
+          <div className="hall-wrapper">
+            <SeatGrid
+              seats={seats}
+              selectedSeatIds={selectedSeatIds}
+              onToggleSeat={handleToggleSeat}
+              maxSeatsReached={remainingAllowance === 0}
+            />
+          </div>
 
-          {/* Booking Summary Sidebar */}
-          <aside className="summary-card" aria-label="Booking summary">
-            <div className="sum-movie">
-              <div
-                className="poster"
-                style={{
-                  background: schedule.movie.posterUrl
-                    ? `url(${schedule.movie.posterUrl})`
-                    : gradient,
-                }}
-              >
-                {!schedule.movie.posterUrl && (
-                  <div className="ptitle" style={{ fontSize: '11px' }}>
-                    {schedule.movie.title}
-                  </div>
+          {/* Dark "YOUR TICKETS" Summary Panel */}
+          <aside className="summary" aria-label="Booking summary">
+            <div className="head">
+              <h2>Your tickets</h2>
+            </div>
+
+            <div className="body">
+              <div style={{ minHeight: '60px' }}>
+                {selectedSeats.length === 0 ? (
+                  <p className="soft" style={{ fontSize: '14px', fontStyle: 'italic', padding: 'var(--space-2) 0' }}>
+                    Click any available seat in the hall to select.
+                  </p>
+                ) : (
+                  selectedSeats.map((s) => {
+                    const held = heldReservations.get(s.seatId);
+                    const seatPrice = held ? held.price : s.price;
+                    return (
+                      <div key={s.seatId} className="li">
+                        <span>
+                          {s.rowLabel}{s.seatNumber} · {s.type === 'VIP' ? 'VIP' : 'Standard'}
+                        </span>
+                        <b>{formatMoney(seatPrice)}</b>
+                      </div>
+                    );
+                  })
                 )}
               </div>
-              <div>
-                <h2 style={{ fontSize: '19px' }}>{schedule.movie.title}</h2>
-                <div className="muted" style={{ fontSize: '13px', marginTop: 'var(--space-1)', lineHeight: 1.5 }}>
-                  {formatFullDateTime(schedule.startTime)}
-                  <br />
-                  {schedule.theater.name}
-                </div>
+
+              {/* Big Total */}
+              <div className="total">
+                <span>
+                  Total · {selectedSeats.length} {selectedSeats.length === 1 ? 'seat' : 'seats'}
+                </span>
+                <b>{formatMoney(totalPrice)}</b>
               </div>
-            </div>
 
-            {/* Selected Seats List */}
-            <div style={{ minHeight: '60px' }}>
-              {selectedSeats.length === 0 ? (
-                <div className="faint" style={{ fontSize: '14px', fontStyle: 'italic', padding: 'var(--space-3) 0' }}>
-                  No seats selected yet. Click any available seat in the map.
-                </div>
-              ) : (
-                selectedSeats.map((s) => (
-                  <div key={s.seatId} className="line-item">
-                    <span>
-                      Seat {s.rowLabel}{s.seatNumber} · {s.type === 'VIP' ? 'VIP' : 'Standard'}
-                    </span>
-                    <b>${s.price.toFixed(2)}</b>
-                  </div>
-                ))
+              {/* Hold Countdown Clock */}
+              {heldExpiresAt && (
+                <HoldTimer
+                  expiresAt={heldExpiresAt}
+                  onExpire={handleHoldExpired}
+                />
               )}
+
+              {/* Primary Action Button */}
+              <button
+                type="button"
+                className="btn red"
+                disabled={selectedSeats.length === 0 || isSubmitting}
+                onClick={handleProceed}
+                style={{ width: '100%' }}
+              >
+                {isSubmitting
+                  ? 'Processing...'
+                  : user
+                  ? 'Continue to secure payment'
+                  : 'Sign in to reserve seats'}
+              </button>
+
+              <p className="soft" style={{ fontSize: '13px', lineHeight: 1.5, textAlign: 'center' }}>
+                Secure payment by Stripe · free cancellation until 2 hours before the show
+              </p>
             </div>
-
-            {/* Total */}
-            <div className="total-row">
-              <span className="muted">
-                Total · {selectedSeats.length} {selectedSeats.length === 1 ? 'seat' : 'seats'}
-              </span>
-              <b>${totalPrice.toFixed(2)}</b>
-            </div>
-
-            {/* Hold Timer */}
-            {heldExpiresAt && (
-              <HoldTimer
-                expiresAt={heldExpiresAt}
-                onExpire={handleHoldExpired}
-              />
-            )}
-
-            {/* Continue Button */}
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={selectedSeats.length === 0 || isSubmitting}
-              onClick={handleProceed}
-              style={{ width: '100%' }}
-            >
-              {isSubmitting
-                ? 'Processing...'
-                : user
-                ? 'Continue to secure payment'
-                : 'Sign in to reserve seats'}
-            </button>
-
-            <div className="stripe-badge">
-              Secure checkout by <b>stripe</b>
-              <br />
-              Your card details never touch our servers
-            </div>
-
-            <p className="faint" style={{ fontSize: '12px', lineHeight: 1.5 }}>
-              Free cancellation with a full refund until 2 hours before the showtime.
-            </p>
           </aside>
         </div>
       </main>
