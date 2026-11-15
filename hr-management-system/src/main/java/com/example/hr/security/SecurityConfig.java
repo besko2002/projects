@@ -45,6 +45,7 @@ class SecurityConfig {
                         .requestMatchers("/api/auth/login",
                                 "/actuator/health", "/actuator/health/**", "/actuator/info",
                                 "/v3/api-docs", "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/employees/*/reset-password").hasAnyRole("HR", "ADMIN")
                         .anyRequest().authenticated())
                 // A bad or expired bearer token is handled by the resource server's own entry point, so the
                 // JSON handlers must be set here too, not only on exceptionHandling().

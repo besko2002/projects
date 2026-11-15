@@ -129,6 +129,16 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.CONFLICT, "The record was modified concurrently; please retry", request);
     }
 
+    @ExceptionHandler({
+            org.springframework.dao.PessimisticLockingFailureException.class,
+            jakarta.persistence.PessimisticLockException.class,
+            jakarta.persistence.LockTimeoutException.class
+    })
+    public ResponseEntity<ApiError> handlePessimisticLock(Exception ex, HttpServletRequest request) {
+        log.warn("Pessimistic lock or deadlock on {} {}: {}", request.getMethod(), request.getRequestURI(), ex.getMessage());
+        return build(HttpStatus.CONFLICT, "A concurrent update locked this record; please retry", request);
+    }
+
     /** Catch-all: log the cause server-side, never leak internals to the client. */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleUnexpected(Exception ex, HttpServletRequest request) {

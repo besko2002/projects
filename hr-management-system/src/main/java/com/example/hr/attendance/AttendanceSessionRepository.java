@@ -32,8 +32,7 @@ public interface AttendanceSessionRepository extends JpaRepository<AttendanceSes
                                            @Param("workDate") LocalDate workDate);
 
     /** All attendance writers take this database row lock before reading any sessions. */
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select e from Employee e where e.id = :employeeId")
+    @Query(value = "select * from employees where id = :employeeId for no key update", nativeQuery = true)
     Optional<Employee> lockEmployee(@Param("employeeId") UUID employeeId);
 
     /** Resolve ownership without loading a possibly stale session before acquiring its employee lock. */

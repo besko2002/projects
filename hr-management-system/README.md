@@ -425,7 +425,7 @@ then deduct), and days outside the employment window (before the hire date, afte
 termination date) are not emitted either.
 
 **HR corrections** (`correct` an existing session, or add a missing one) always carry a
-**mandatory reason**, stamp `corrected_by` and flip `source` to `CORRECTION`. HR opens an employee's
+**mandatory reason**, stamp `corrected_by` and flip `source` to `HR_CORRECTION`. HR opens an employee's
 **Manage attendance** screen to add a missing session or correct an existing one. Correction inputs
 explicitly use UTC to avoid ambiguity during repeated daylight-saving hours. Nobody repairs their own
 attendance; another HR/ADMIN must do it. Refused:
@@ -661,6 +661,8 @@ on hover, click or keyboard focus (Escape closes it), with the *Sign in* title w
 ![Leave](docs/screenshots/employee-leave.png)
 ![Approvals](docs/screenshots/manager-approvals.png)
 ![Employees](docs/screenshots/hr-employees.png)
+![Attendance repair](docs/screenshots/hr-attendance-repair.png)
+![Password reset](docs/screenshots/hr-password-reset.png)
 ![Reports](docs/screenshots/hr-reports.png)
 
 The UI uses a warm-paper theme with bold outlines, offset shadows and yellow / blue / pink accents, plus motion

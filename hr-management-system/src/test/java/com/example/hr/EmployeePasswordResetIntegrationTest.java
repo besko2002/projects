@@ -48,6 +48,8 @@ class EmployeePasswordResetIntegrationTest extends AbstractIntegrationTest {
         assertThat(hash).isNotEqualTo(temporary).startsWith("$2");
         String detail = jdbc.queryForObject("select detail from security_events where employee_id = ? and detail like 'Password reset%'", String.class, staff.id());
         assertThat(detail).contains(hr.id().toString(), "Identity verified in person").doesNotContain(temporary, hash);
+        String eventEmail = jdbc.queryForObject("select email from security_events where employee_id = ? and detail like 'Password reset%'", String.class, staff.id());
+        assertThat(eventEmail).isEqualTo(staff.email());
         mvc.perform(post("/api/auth/change-password").header("Authorization", bearer(fresh))
                 .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(
                         Map.of("currentPassword", temporary, "newPassword", "Recovered@2026"))))
@@ -104,5 +106,13 @@ class EmployeePasswordResetIntegrationTest extends AbstractIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Verified\"}"))
                 .andExpect(status().isUnauthorized());
         assertThat(jdbc.queryForObject("select token_version from employees where id = ?", Integer.class, staff.id())).isZero();
+    }
+
+    @Test
+    void nonHrCallerWithBlankReasonGets403Not400() throws Exception {
+        String admin = adminToken();
+        NewEmployee staff = createEmployee(admin, "Regular Staff", Role.EMPLOYEE, null);
+        String staffToken = login(staff.email(), staff.password());
+        reset(staffToken, staff.id(), "   ").andExpect(status().isForbidden());
     }
 }

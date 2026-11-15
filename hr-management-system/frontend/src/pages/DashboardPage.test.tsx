@@ -189,4 +189,42 @@ describe('dashboard', () => {
 
     expect(await screen.findByText('No leave requests yet.')).toBeInTheDocument();
   });
+
+  it('does not disable check-in/out or show loading flicker during silent background reloads', async () => {
+    let resolveReload: (value: unknown) => void = () => {};
+    let reloadTriggered = false;
+    installFetchMock(
+      dashboardRoutes({
+        ...CHECKED_OUT,
+        'GET /api/attendance/today': () => {
+          if (!reloadTriggered) {
+            reloadTriggered = true;
+            return {
+              body: makeAttendanceRange({ days: [makeDay({ status: 'PRESENT', openSession: false })] }),
+            };
+          }
+          return new Promise((resolve) => {
+            resolveReload = () => resolve({
+              status: 200,
+              body: makeAttendanceRange({ days: [makeDay({ status: 'PRESENT', openSession: false })] }),
+            });
+          });
+        },
+      }),
+    );
+
+    renderApp('/');
+
+    const checkInBtn = await screen.findByRole('button', { name: 'Check in' });
+    expect(checkInBtn).toBeEnabled();
+
+    // Trigger window focus refresh
+    window.dispatchEvent(new Event('focus'));
+
+    // Button remains enabled and "Loading today…" does not flicker into view
+    expect(checkInBtn).toBeEnabled();
+    expect(screen.queryByText('Loading today…')).not.toBeInTheDocument();
+
+    resolveReload(null);
+  });
 });

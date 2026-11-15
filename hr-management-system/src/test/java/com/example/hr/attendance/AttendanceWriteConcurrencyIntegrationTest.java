@@ -42,6 +42,22 @@ class AttendanceWriteConcurrencyIntegrationTest extends AbstractAttendanceIntegr
     }
 
     @Test
+    void concurrentMutualCorrectionBetweenHrEmployeesCannotDeadlockWithHttp500() throws Exception {
+        String admin = adminToken();
+        NewEmployee hrA = createEmployee(admin, "Alice HR", Role.HR, null);
+        NewEmployee hrB = createEmployee(admin, "Bob HR", Role.HR, null);
+        String tokenA = login(hrA.email(), hrA.password());
+        String tokenB = login(hrB.email(), hrB.password());
+
+        List<Integer> statuses = race(
+                () -> code(addSession(tokenA, hrB.id(), at(march(4), "09:00"), at(march(4), "12:00"), "A corrects B")),
+                () -> code(addSession(tokenB, hrA.id(), at(march(4), "09:00"), at(march(4), "12:00"), "B corrects A")));
+
+        assertThat(statuses).allSatisfy(status -> assertThat(status).isIn(201, 409));
+        assertThat(statuses).doesNotContain(500);
+    }
+
+    @Test
     void concurrentInsertAndCorrectionCannotCreateOverlap() throws Exception {
         UUID id = addSessionOk(hrToken, staff.id(), march(4), "09:00", "10:00");
         List<Integer> statuses = race(

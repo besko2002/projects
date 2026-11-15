@@ -23,14 +23,24 @@ function utcLabel(value: string | null): string {
 
 export function EmployeeAttendancePage(): JSX.Element {
   const { id = '' } = useParams<{ id: string }>();
-  return <AttendanceEditor key={id} employeeId={id} />;
+  const today = useResource<AttendanceRangeResponse>(
+    (signal) => api.myAttendanceToday(signal),
+    'attendance-business-today',
+  );
+  if (today.loading && today.data === null && today.error === null) {
+    return <Loading label="Loading company calendar…" />;
+  }
+  const defaultDate = today.data?.from;
+  return <AttendanceEditor key={`${id}-${defaultDate ?? 'default'}`} employeeId={id} defaultDate={defaultDate} />;
 }
 
-function AttendanceEditor({ employeeId }: { employeeId: string }): JSX.Element {
+function AttendanceEditor({ employeeId, defaultDate }: { employeeId: string; defaultDate?: string }): JSX.Element {
   const { user, role } = useAuth();
   const toast = useToast();
-  const [year, setYear] = useState(currentYear());
-  const [month, setMonth] = useState(currentMonth());
+  const initialYear = defaultDate ? Number(defaultDate.slice(0, 4)) : currentYear();
+  const initialMonth = defaultDate ? Number(defaultDate.slice(5, 7)) : currentMonth();
+  const [year, setYear] = useState(initialYear);
+  const [month, setMonth] = useState(initialMonth);
   const range = monthRange(year, month);
   const employee = useResource<EmployeeProfile>((signal) => api.getEmployee(employeeId, signal), `attendance-employee-${employeeId}`);
   const attendance = useResource<AttendanceRangeResponse>(

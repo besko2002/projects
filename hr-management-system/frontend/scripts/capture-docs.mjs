@@ -64,6 +64,38 @@ async function capture(path, filename, role = null, revealLogin = false) {
         f.makeHeadcount({ department: 'People', count: 8 }),
         f.makeHeadcount({ department: 'Operations', count: 15 }),
       ],
+      '/api/attendance/today': f.makeAttendanceRange({ from: today, to: today, days: [f.makeDay({ day: today })] }),
+      '/api/employees/emp-2': staff[2],
+      '/api/employees/emp-2/audit': f.makePage([]),
+      '/api/attendance/employees/emp-2': f.makeAttendanceRange({
+        employeeId: 'emp-2',
+        from: `${year}-11-01`,
+        to: `${year}-11-30`,
+        days: [
+          f.makeDay({
+            day: `${year}-11-10`,
+            status: 'PRESENT',
+            firstIn: `${year}-11-10T09:00:00`,
+            lastOut: `${year}-11-10T17:00:00`,
+            workedMinutes: 480,
+            sessions: [
+              {
+                id: 'sess-1',
+                employeeId: 'emp-2',
+                workDate: `${year}-11-10`,
+                checkIn: `${year}-11-10T07:00:00.000Z`,
+                checkOut: `${year}-11-10T15:00:00.000Z`,
+                localCheckIn: '09:00',
+                localCheckOut: '17:00',
+                minutes: 480,
+                source: 'SELF',
+                correctedById: null,
+                correctionReason: null,
+              },
+            ],
+          }),
+        ],
+      }),
     };
     if (request.method() !== 'GET' || !(pathname in table)) {
       errors.push(`${request.method()} ${pathname}`);
@@ -97,6 +129,8 @@ try {
   await capture('/leave', 'employee-leave.png', 'EMPLOYEE');
   await capture('/approvals', 'manager-approvals.png', 'MANAGER');
   await capture('/employees', 'hr-employees.png', 'HR');
+  await capture('/employees/emp-2/attendance', 'hr-attendance-repair.png', 'HR');
+  await capture('/employees/emp-2', 'hr-password-reset.png', 'HR');
   await capture('/reports', 'hr-reports.png', 'HR');
 } finally {
   await browser.close();

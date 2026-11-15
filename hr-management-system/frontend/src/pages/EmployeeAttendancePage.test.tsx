@@ -15,6 +15,7 @@ const session: SessionResponse = {
 function routes(overrides: Record<string, RouteHandler> = {}): Record<string, RouteHandler> {
   return {
     ...signedIn({ role: 'HR', me: { id: 'hr-1' } }),
+    'GET /api/attendance/today': { body: makeAttendanceRange({ from: '2026-11-10', to: '2026-11-10', days: [makeDay({ day: '2026-11-10' })] }) },
     'GET /api/employees/emp-7': { body: makeEmployee({ id: 'emp-7', fullName: 'Rana Hussein' }) },
     'GET /api/attendance/employees/emp-7': { body: makeAttendanceRange({ employeeId: 'emp-7', days: [makeDay({ day: session.workDate, sessions: [session] })] }) },
     ...overrides,
@@ -86,5 +87,14 @@ describe('HR attendance repair', () => {
     renderApp('/employees/emp-7/attendance');
     await screen.findByRole('heading', { name: FORBIDDEN_TITLE });
     await waitFor(() => expect(mock.urlsFor('GET', '/api/attendance/employees/emp-7')).toHaveLength(0));
+  });
+
+  it('opens on the company calendar month from /api/attendance/today', async () => {
+    installFetchMock(routes({
+      'GET /api/attendance/today': { body: makeAttendanceRange({ from: '2028-05-15', to: '2028-05-15', days: [makeDay({ day: '2028-05-15' })] }) },
+      'GET /api/attendance/employees/emp-7': { body: makeAttendanceRange({ from: '2028-05-01', to: '2028-05-31', employeeId: 'emp-7', days: [] }) },
+    }));
+    renderApp('/employees/emp-7/attendance');
+    expect(await screen.findByLabelText('Pick a month')).toHaveValue('2028-05');
   });
 });

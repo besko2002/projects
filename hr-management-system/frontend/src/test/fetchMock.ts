@@ -19,7 +19,10 @@ interface RecordedCall {
   body: unknown;
 }
 
-export type RouteHandler = MockReply | ((call: RecordedCall) => MockReply);
+export type RouteHandler =
+  | MockReply
+  | Promise<MockReply>
+  | ((call: RecordedCall) => MockReply | Promise<MockReply>);
 
 export interface FetchMock {
   spy: Mock<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>;
@@ -90,7 +93,8 @@ export function installFetchMock(table: Record<string, RouteHandler>): FetchMock
     if (handler === undefined) {
       return Promise.reject(new Error(`Unexpected request: ${method} ${url}`));
     }
-    return Promise.resolve(makeResponse(typeof handler === 'function' ? handler(call) : handler));
+    const result = typeof handler === 'function' ? handler(call) : handler;
+    return Promise.resolve(result).then(makeResponse);
   });
 
   vi.stubGlobal('fetch', spy);

@@ -3,6 +3,7 @@ package com.example.hr.attendance;
 import com.example.hr.PostgresTestDatabase;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,6 +53,11 @@ class OpenSessionGuardMigrationTest {
     void cleanUp() {
         jdbc.execute("drop schema if exists public cascade");
         jdbc.execute("create schema public");
+    }
+
+    @AfterAll
+    static void tearDownClass() {
+        POSTGRES.stop();
     }
 
     @Test

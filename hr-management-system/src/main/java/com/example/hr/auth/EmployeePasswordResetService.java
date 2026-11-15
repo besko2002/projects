@@ -62,7 +62,7 @@ public class EmployeePasswordResetService {
         employees.saveAndFlush(target);
         // Atomic with the password update: a rolled-back reset must not leave a success audit.
         // Actor and target are recorded, never the credential or its hash.
-        entityManager.persist(new SecurityEvent(SecurityEvent.Type.PASSWORD_CHANGED, actor.getEmail(),
+        entityManager.persist(new SecurityEvent(SecurityEvent.Type.PASSWORD_CHANGED, target.getEmail(),
                 null, id, "Password reset by " + actor.getId() + "; reason: " + reason.trim(), Instant.now()));
         return new PasswordReset(id, temporaryPassword);
     }

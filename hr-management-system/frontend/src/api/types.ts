@@ -24,7 +24,7 @@ type AttendanceStatus =
 
 type DayKind = 'WORKING_DAY' | 'WEEKEND' | 'HOLIDAY';
 
-type AttendanceSource = 'SELF' | 'CORRECTION' | 'IMPORT';
+type AttendanceSource = 'SELF' | 'HR_CORRECTION';
 
 type PayrollRunStatus = 'DRAFT' | 'FINALIZED';
 

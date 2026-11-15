@@ -395,7 +395,7 @@ public class AttendanceService {
     }
 
     private Employee requireActive() {
-        Employee me = lockEmployee(currentEmployee.require().getId());
+        Employee me = lockEmployee(currentEmployee.id());
         if (!me.isActive()) {
             throw new ConflictException("A terminated employee cannot record attendance");
         }

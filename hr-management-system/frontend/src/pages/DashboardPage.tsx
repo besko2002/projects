@@ -44,6 +44,9 @@ export function DashboardPage(): JSX.Element {
 
   const dayToday = attendance.data?.days[0] ?? null;
   const openSession = dayToday?.openSession === true;
+  const hasNoData = attendance.data === null;
+  const isInitialLoading = attendance.loading && hasNoData && attendance.error === null;
+  const clockDisabled = hasNoData || attendance.error !== null || busy !== null;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!openSession) {
@@ -96,7 +99,7 @@ export function DashboardPage(): JSX.Element {
 
       <div className="grid grid-2">
         <Card title="Today's attendance">
-          {attendance.loading && <Loading label="Loading today…" />}
+          {isInitialLoading && <Loading label="Loading today…" />}
           {attendance.error !== null && <Banner>{attendance.error}</Banner>}
           {clockError !== null && (
             <Banner
@@ -142,7 +145,7 @@ export function DashboardPage(): JSX.Element {
             <button
               type="button"
               className={openSession ? 'button' : 'button button-primary'}
-              disabled={attendance.loading || attendance.error !== null || dayToday === null || busy !== null || openSession}
+              disabled={clockDisabled || openSession}
               onClick={() => {
                 void clock('in');
               }}
@@ -152,7 +155,7 @@ export function DashboardPage(): JSX.Element {
             <button
               type="button"
               className={openSession ? 'button button-primary' : 'button'}
-              disabled={attendance.loading || attendance.error !== null || dayToday === null || busy !== null || !openSession}
+              disabled={clockDisabled || !openSession}
               onClick={() => {
                 void clock('out');
               }}

@@ -66,6 +66,14 @@ public final class PostgresTestDatabase {
         return container == null ? password : container.getPassword();
     }
 
+    public synchronized void stop() {
+        if (container != null) {
+            container.stop();
+            return;
+        }
+        close();
+    }
+
     private synchronized void close() {
         if (databaseName == null || !databaseName.matches("hr_test_[0-9a-f]{32}")) return;
         try (var connection = DriverManager.getConnection(adminUrl, username, password);
