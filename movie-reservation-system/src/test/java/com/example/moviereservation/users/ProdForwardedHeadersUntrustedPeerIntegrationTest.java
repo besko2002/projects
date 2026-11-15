@@ -17,14 +17,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * CB-17, direct-client case: the prod profile through real Tomcat, but the connecting peer is NOT a
- * trusted proxy (the trusted range is narrowed so 127.0.0.1 no longer matches). A client talking to
+ * trusted proxy (TRUSTED_PROXIES narrows the trusted range so 127.0.0.1 no longer matches). A client talking to
  * the app directly must not be able to choose its own rate-limit bucket with a forged header.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "app.jwt.secret=prod-profile-test-secret-6f0c1d2e3a4b5c6d7e8f9a0b1c2d3e4f",
         "app.admin.password=Prod-Profile-Admin-7!",
         "spring.datasource.password=not-the-demo-password",
-        "server.tomcat.remoteip.internal-proxies=10\\.255\\.255\\.254"
+        "TRUSTED_PROXIES=10\\.255\\.255\\.254"
 })
 @ActiveProfiles("prod")
 @Import(TestcontainersConfiguration.class)

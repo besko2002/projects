@@ -181,7 +181,7 @@ public class UserService {
                     // Do not query the database within the aborted transaction, which causes 500 error.
                     // The driver message repeats the duplicate key value (the email), so it is not logged.
                     log.warn("Unique constraint violation registering user via Google email={}", ResendEmailSender.maskEmail(email));
-                    throw new ConflictException("Email is already registered");
+                    throw new ConcurrentGoogleSignUpException();
                 }
                 log.info("Registered new user via Google id={} email={}", user.getId(), ResendEmailSender.maskEmail(user.getEmail()));
             }

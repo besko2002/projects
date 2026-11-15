@@ -175,3 +175,17 @@ export function todayInZone(timeZone?: string | null, now: Date = new Date()): s
   if (!isValidTimeZone(timeZone)) return formatLocalDate(now);
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }
+
+/** YYYY-MM-DD plus `days` calendar days (pure date arithmetic, no time zone involved). */
+export function addDaysToDateString(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+/** [start, end) instants covering whole local days `from`..`to` (inclusive) in `timeZone`. */
+export function localDayRange(from: string, to: string, timeZone?: string | null): { fromIso: string; toIso: string } {
+  return {
+    fromIso: zonedWallTimeToDate(from, '00:00', timeZone).toISOString(),
+    toIso: zonedWallTimeToDate(addDaysToDateString(to, 1), '00:00', timeZone).toISOString(),
+  };
+}

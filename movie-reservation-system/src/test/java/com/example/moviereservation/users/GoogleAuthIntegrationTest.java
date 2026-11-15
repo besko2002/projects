@@ -209,7 +209,7 @@ class GoogleAuthIntegrationTest {
     }
 
     @RepeatedTest(5)
-    void concurrentFirstGoogleSignUpsForOneEmailNeverAnswer500() throws Exception {
+    void concurrentFirstGoogleSignUpsForOneUserAllSignInToOneAccount() throws Exception {
         String sub = "google-sub-race-" + System.nanoTime();
         String email = "race-" + System.nanoTime() + "@cinema.test";
         String body = objectMapper.writeValueAsString(new GoogleAuthRequest(validToken(sub, email, "Race Patron")));
@@ -237,12 +237,12 @@ class GoogleAuthIntegrationTest {
             for (java.util.concurrent.Future<Integer> result : results) {
                 statuses.add(result.get(60, java.util.concurrent.TimeUnit.SECONDS));
             }
-            assertThat(statuses).as("statuses %s", statuses).allMatch(code -> code == 200 || code == 409);
-            assertThat(statuses).contains(200);
+            assertThat(statuses).as("statuses %s", statuses).allMatch(code -> code == 200);
         } finally {
             pool.shutdownNow();
         }
         assertThat(userRepository.findByGoogleSub(sub)).isPresent();
+        assertThat(userRepository.findByEmail(email)).isPresent();
     }
 
     @Test

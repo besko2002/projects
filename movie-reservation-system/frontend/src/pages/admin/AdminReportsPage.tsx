@@ -1,20 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AdminLayout } from './AdminLayout';
 import * as adminApi from '../../api/adminApi';
 import * as schedulesApi from '../../api/schedulesApi';
 import type { AdminTicket, OccupancyReport, RevenueReport } from '../../types/admin';
 import type { ScheduleSummary } from '../../types/schedule';
+import { addDaysToDateString, isValidTimeZone, localDayRange, todayInZone } from '../../utils/dateUtils';
 
 export function AdminReportsPage(): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<'revenue' | 'occupancy' | 'tickets'>('revenue');
 
-  // Revenue report state initialized cleanly
-  const [fromDate, setFromDate] = useState<string>(() => {
-    const start = new Date();
-    start.setDate(start.getDate() - 30);
-    return start.toISOString().slice(0, 10);
-  });
-  const [toDate, setToDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  // Report days are cinema days (app.schedule.zone, the zone the daily breakdown uses), not UTC days.
+  const [cinemaZone, setCinemaZone] = useState<string | null>(null);
+  const datesTouched = useRef(false);
+  const [fromDate, setFromDate] = useState<string>(() => addDaysToDateString(todayInZone(null), -30));
+  const [toDate, setToDate] = useState<string>(() => todayInZone(null));
   const [revenueData, setRevenueData] = useState<RevenueReport | null>(null);
   const [isRevenueLoading, setIsRevenueLoading] = useState(false);
   const [revenueError, setRevenueError] = useState<string | null>(null);
@@ -55,13 +54,34 @@ export function AdminReportsPage(): React.JSX.Element {
     };
   }, []);
 
+  useEffect(() => {
+    let ignore = false;
+    Promise.resolve()
+      .then(() => schedulesApi.getScheduleSettings())
+      .then((settings) => {
+        if (ignore || !isValidTimeZone(settings?.zone)) return;
+        setCinemaZone(settings.zone);
+        // Default range = the last 30 cinema days, unless the admin already picked dates.
+        if (!datesTouched.current) {
+          const today = todayInZone(settings.zone);
+          setToDate(today);
+          setFromDate(addDaysToDateString(today, -30));
+        }
+      })
+      .catch(() => {
+        // Keep the browser's own days if the cinema zone cannot be loaded.
+      });
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
   // Fetch Revenue when activeTab is 'revenue' or date range changes
   useEffect(() => {
     if (activeTab !== 'revenue' || !fromDate || !toDate) return;
     let ignore = false;
 
-    const fromIso = new Date(`${fromDate}T00:00:00Z`).toISOString();
-    const toIso = new Date(`${toDate}T23:59:59Z`).toISOString();
+    const { fromIso, toIso } = localDayRange(fromDate, toDate, cinemaZone);
 
     adminApi.getRevenueReport(fromIso, toIso)
       .then((res) => {
@@ -80,7 +100,7 @@ export function AdminReportsPage(): React.JSX.Element {
     return () => {
       ignore = true;
     };
-  }, [activeTab, fromDate, toDate]);
+  }, [activeTab, fromDate, toDate, cinemaZone]);
 
   // Fetch Occupancy when activeTab is 'occupancy' and a schedule is selected
   useEffect(() => {
@@ -141,9 +161,8 @@ export function AdminReportsPage(): React.JSX.Element {
     setIsRevenueLoading(true);
     setRevenueError(null);
     try {
-      const fromIso = fromDate ? new Date(`${fromDate}T00:00:00Z`).toISOString() : undefined;
-      const toIso = toDate ? new Date(`${toDate}T23:59:59Z`).toISOString() : undefined;
-      const res = await adminApi.getRevenueReport(fromIso, toIso);
+      const range = fromDate && toDate ? localDayRange(fromDate, toDate, cinemaZone) : null;
+      const res = await adminApi.getRevenueReport(range?.fromIso, range?.toIso);
       setRevenueData(res);
     } catch (err) {
       setRevenueError(err instanceof Error ? err.message : 'Failed to load revenue report');
@@ -222,7 +241,10 @@ export function AdminReportsPage(): React.JSX.Element {
                 id="revenue-from"
                 type="date"
                 value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
+                onChange={(e) => {
+                  datesTouched.current = true;
+                  setFromDate(e.target.value);
+                }}
                 style={{
                   padding: '8px 12px',
                   border: '2px solid var(--ink)',
@@ -242,7 +264,10 @@ export function AdminReportsPage(): React.JSX.Element {
                 id="revenue-to"
                 type="date"
                 value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
+                onChange={(e) => {
+                  datesTouched.current = true;
+                  setToDate(e.target.value);
+                }}
                 style={{
                   padding: '8px 12px',
                   border: '2px solid var(--ink)',

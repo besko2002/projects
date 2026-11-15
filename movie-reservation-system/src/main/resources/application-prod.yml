@@ -8,7 +8,9 @@ server:
       # (the proxy sets Host itself; absolute links use APP_BASE_URL).
       host-header: ''
       port-header: ''
-      internal-proxies: '10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}|::1|0:0:0:0:0:0:0:1'
+      # Peers allowed to set X-Forwarded-For/-Proto. Default: loopback and private ranges (a proxy on
+      # the same host or network). Set TRUSTED_PROXIES to your proxy's exact address regex to narrow it.
+      internal-proxies: '${TRUSTED_PROXIES:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}|::1|0:0:0:0:0:0:0:1}'
 
 springdoc:
   api-docs:

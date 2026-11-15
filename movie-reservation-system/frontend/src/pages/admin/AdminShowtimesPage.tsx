@@ -4,7 +4,7 @@ import * as moviesApi from '../../api/moviesApi';
 import * as schedulesApi from '../../api/schedulesApi';
 import * as adminApi from '../../api/adminApi';
 import { ApiException } from '../../api/client';
-import { getDaysBetween, isValidTimeZone, todayInZone, zonedWallTimeToDate } from '../../utils/dateUtils';
+import { addDaysToDateString, getDaysBetween, isValidTimeZone, todayInZone, zonedWallTimeToDate } from '../../utils/dateUtils';
 import type { MovieSummary } from '../../types/movie';
 import type { ScheduleSummary } from '../../types/schedule';
 import type { TheaterSummary } from '../../types/admin';
@@ -13,11 +13,6 @@ export interface BulkSlotResult {
   slot: string;
   status: 'created' | 'conflict' | 'past' | 'error';
   reason: string;
-}
-
-function addDaysToDateString(date: string, days: number): string {
-  const [y, m, d] = date.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
 export function AdminShowtimesPage(): React.JSX.Element {

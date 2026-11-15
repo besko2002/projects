@@ -66,8 +66,10 @@ server:
       protocol-header: x-forwarded-proto
       host-header: ''   # ignore client-supplied X-Forwarded-Host
       port-header: ''   # ignore client-supplied X-Forwarded-Port
-      internal-proxies: '10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}|::1|0:0:0:0:0:0:0:1'
+      internal-proxies: '${TRUSTED_PROXIES:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}|::1|0:0:0:0:0:0:0:1}'
 ```
+
+`TRUSTED_PROXIES` (optional) replaces the trusted-proxy regex. The default trusts loopback and private ranges, which is right for a reverse proxy on the same host or private network; if clients can reach the app directly from a private network, set it to the proxy's exact address, e.g. `TRUSTED_PROXIES=10\.0\.0\.5`.
 
 ### Sample Nginx Configuration Snippet
 ```nginx

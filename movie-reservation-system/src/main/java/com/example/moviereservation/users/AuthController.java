@@ -110,7 +110,14 @@ public class AuthController {
                                                     HttpServletRequest servletRequest) {
         rateLimiter.googleAuth(servletRequest.getRemoteAddr());
         GoogleTokenPayload payload = googleTokenVerifier.verify(request.idToken());
-        AuthResponse response = userService.authenticateWithGoogle(payload);
+        AuthResponse response;
+        try {
+            response = userService.authenticateWithGoogle(payload);
+        } catch (ConcurrentGoogleSignUpException race) {
+            // A simultaneous first sign-in of the same Google user won the insert; its row is
+            // committed now, so a fresh transaction signs this request in to that account.
+            response = userService.authenticateWithGoogle(payload);
+        }
         return ResponseEntity.ok(response);
     }
 

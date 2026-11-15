@@ -40,9 +40,9 @@ public class AdminSeeder implements ApplicationRunner {
     public void seed() {
         boolean created = userService.createAdminIfAbsent(adminName, adminEmail, adminPassword);
         if (created) {
-            log.info("Seeded ADMIN account for {}", adminEmail);
+            log.info("Seeded ADMIN account for {}", com.example.moviereservation.users.email.ResendEmailSender.maskEmail(adminEmail));
         } else {
-            log.debug("ADMIN account for {} already exists; nothing to seed", adminEmail);
+            log.debug("ADMIN account for {} already exists; nothing to seed", com.example.moviereservation.users.email.ResendEmailSender.maskEmail(adminEmail));
         }
     }
 }
