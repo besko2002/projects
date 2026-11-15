@@ -1,7 +1,20 @@
 # syntax=docker/dockerfile:1
 
 # ---------------------------------------------------------------------------
-# Stage 1: build the Spring Boot fat jar with the project's own Maven wrapper.
+# Stage 1: build the Vite frontend SPA.
+# ---------------------------------------------------------------------------
+FROM node:20-alpine AS frontend
+
+WORKDIR /frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+# ---------------------------------------------------------------------------
+# Stage 2: build the Spring Boot fat jar with the project's own Maven wrapper.
 # pom.xml + .mvn + mvnw are copied first so the dependency download layer is
 # reused as long as the build files do not change.
 # ---------------------------------------------------------------------------
@@ -17,13 +30,18 @@ RUN ./mvnw -B -q -DskipTests dependency:go-offline
 
 COPY src/ src/
 
+# Replace static assets with fresh frontend build and purge stale bundles
+RUN rm -rf src/main/resources/static/assets
+COPY --from=frontend /frontend/dist/index.html src/main/resources/static/index.html
+COPY --from=frontend /frontend/dist/assets src/main/resources/static/assets
+
 RUN ./mvnw -q -DskipTests package \
     # target/ also holds <artifact>.jar.original (the pre-repackage jar); *.jar
     # matches only the executable one.
     && cp target/*.jar /build/app.jar
 
 # ---------------------------------------------------------------------------
-# Stage 2: runtime. JRE only (no compiler, no Maven, no sources) and a
+# Stage 3: runtime. JRE only (no compiler, no Maven, no sources) and a
 # non-root user. The Ubuntu-based Temurin JRE image already ships curl, which
 # HEALTHCHECK below uses; the `command -v curl` guard fails the build loudly if
 # a future base image ever drops it.

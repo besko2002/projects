@@ -4,7 +4,7 @@ This guide details the deployment architecture, configuration options, productio
 
 > [!IMPORTANT]
 > **Live Public URL: Not deployed / not verified.**
-> All build pipelines, unified container/JAR packaging, SPA static forwarding, environment configurations, and database migrations are fully implemented and verified locally in native and container environments. Live public cloud deployment is intentionally out of current scope awaiting host selection and budget approval from the project owner.
+> All build pipelines, unified container/JAR packaging, SPA static forwarding, environment configurations, and database migrations are fully implemented and verified locally in native PostgreSQL execution (209+ integration tests, 61 frontend tests) and multi-stage container builds. Live public cloud deployment is intentionally out of current scope awaiting host selection and budget approval from the project owner.
 
 ---
 
@@ -16,7 +16,7 @@ CineBook can be deployed under two standard production topologies:
 In this mode, the Vite frontend is built into static assets (`npm run build`) and served from Spring Boot's `src/main/resources/static/`. Spring Boot serves both the API endpoints (`/api/**`) and the React SPA (`index.html`) on a single port (e.g., `8080` in Docker or `8093` in native development).
 
 - **Pros**: Zero CORS configuration required, single deployable artifact (`movie-reservation-system.jar`), single HTTPS domain, minimal operational overhead.
-- **Routing**: `SpaWebController` forwards all client HTML navigation routes (`/`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/tickets`, `/movie/{id}`, `/book/{id}`, `/admin/**`) to `index.html`. Unmatched API routes under `/api/**` return strict JSON `404 ApiError` instead of falling through to HTML.
+- **Routing**: `SpaWebController` forwards all client HTML navigation routes (`/`, `/movie/:id`, `/book/:scheduleId`, `/payment/success`, `/payment/cancel`, `/tickets`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/admin`, `/admin/movies`, `/admin/genres`, `/admin/halls`, `/admin/showtimes`, `/admin/reports`) to `index.html`. Unmatched API routes under `/api/**` return strict JSON `404 ApiError` instead of falling through to HTML.
 
 ### Option B: Decoupled Frontend (CDN/Vercel/Cloudflare) + Backend API (Container/PaaS)
 In this mode, the frontend is deployed as a static site to a CDN or edge hosting service (e.g., Cloudflare Pages, Vercel, AWS S3 + CloudFront), and the Spring Boot application runs on a managed container service (e.g., AWS ECS, Google Cloud Run, Render, Railway).
@@ -110,6 +110,7 @@ For live payments or reviewer testing in hosted environments:
 | `SPRING_PROFILES_ACTIVE` | `prod` | Spring profile to activate (`prod` enforces strong secrets guard) | **Yes** |
 | `SERVER_PORT` | `8080` | HTTP listening port (`8093` in local native development) | No |
 | `APP_BASE_URL` | `https://cinebook.example.com` | Public base URL used to construct Stripe checkout success/cancel return URLs | **Yes** |
+| `FRONTEND_BASE_URL` | `https://cinebook.example.com` | Public frontend URL used to construct password reset links (defaults to `APP_BASE_URL`) | No |
 | `DB_URL` | `jdbc:postgresql://db:5432/movie_reservation` | JDBC connection URL for PostgreSQL | **Yes** |
 | `DB_USERNAME` | `postgres` | Database username | **Yes** |
 | `DB_PASSWORD` | `(secret)` | Database password | **Yes** |
