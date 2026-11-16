@@ -26,8 +26,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * (MockMvc never runs Tomcat's {@code RemoteIpValve}, so it cannot prove the {@code native}
  * forward-headers strategy).
  *
- * <p>The test client always connects from 127.0.0.1, which the prod profile trusts as a co-located
- * reverse proxy. A real proxy appends the peer it saw ({@code $proxy_add_x_forwarded_for}), so a
+ * <p>The test client always connects from 127.0.0.1, which the prod profile trusts by default as a
+ * co-located reverse proxy (and nothing else: CB-31). A real proxy appends the peer it saw ({@code $proxy_add_x_forwarded_for}), so a
  * forged left-most {@code X-Forwarded-For} entry must never become the client address.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
@@ -70,17 +70,32 @@ class ProdForwardedHeadersIntegrationTest {
     }
 
     @Test
-    void trustedProxyPatternTrustsOnlyLoopbackAndPrivateRanges() {
+    void forgedForwardedForFromAPrivateNetworkClientStillHitsTheLoginLimit() throws Exception {
+        // CB-31: a client on a LAN/VPN/container network (10.0.0.9) goes through the co-located proxy,
+        // which appends the address it saw. Private ranges are not trusted proxies by default, so
+        // 10.0.0.9 is the client and the forged left-most entries never pick a fresh bucket.
+        String email = register(port, http);
+        for (int attempt = 0; attempt < 5; attempt++) {
+            HttpResponse<String> failed = login(port, http, email, "WrongPassword1!",
+                    "203.0.113." + attempt + ", 10.0.0.9");
+            assertThat(failed.statusCode()).isEqualTo(401);
+        }
+        HttpResponse<String> limited = login(port, http, email, PASSWORD, "203.0.113.99, 10.0.0.9");
+        assertThat(limited.statusCode()).isEqualTo(429);
+    }
+
+    @Test
+    void trustedProxyPatternTrustsOnlyLoopbackByDefault() {
         String regex = environment.getProperty("server.tomcat.remoteip.internal-proxies");
         assertThat(environment.getProperty("server.forward-headers-strategy")).isEqualTo("native");
         assertThat(regex).isNotBlank();
         Pattern pattern = Pattern.compile(regex);
-        for (String trusted : new String[]{"127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255",
-                "192.168.1.10", "169.254.0.1", "::1", "0:0:0:0:0:0:0:1"}) {
+        for (String trusted : new String[]{"127.0.0.1", "127.1.2.3", "::1", "0:0:0:0:0:0:0:1"}) {
             assertThat(pattern.matcher(trusted).matches()).as("trusted %s", trusted).isTrue();
         }
-        for (String untrusted : new String[]{"203.0.113.5", "8.8.8.8", "172.32.0.1", "172.15.0.1",
-                "11.0.0.1", "192.169.0.1", "1270.0.0.1", "127.0.0.1.evil"}) {
+        for (String untrusted : new String[]{"10.0.0.9", "10.1.2.3", "172.16.0.1", "172.17.0.1",
+                "172.31.255.255", "192.168.1.10", "169.254.0.1", "203.0.113.5", "8.8.8.8",
+                "1270.0.0.1", "127.0.0.1.evil", "fd00::1", "::ffff:10.0.0.9"}) {
             assertThat(pattern.matcher(untrusted).matches()).as("untrusted %s", untrusted).isFalse();
         }
     }

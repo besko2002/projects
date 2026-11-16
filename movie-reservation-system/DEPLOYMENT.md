@@ -66,10 +66,20 @@ server:
       protocol-header: x-forwarded-proto
       host-header: ''   # ignore client-supplied X-Forwarded-Host
       port-header: ''   # ignore client-supplied X-Forwarded-Port
-      internal-proxies: '${TRUSTED_PROXIES:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}|::1|0:0:0:0:0:0:0:1}'
+      internal-proxies: '${TRUSTED_PROXIES:127\.\d{1,3}\.\d{1,3}\.\d{1,3}|::1|0:0:0:0:0:0:0:1}'
 ```
 
-`TRUSTED_PROXIES` (optional) replaces the trusted-proxy regex. The default trusts loopback and private ranges, which is right for a reverse proxy on the same host or private network; if clients can reach the app directly from a private network, set it to the proxy's exact address, e.g. `TRUSTED_PROXIES=10\.0\.0\.5`.
+`TRUSTED_PROXIES` (optional) replaces the trusted-proxy regex. The default trusts **loopback only**: a reverse proxy on the same host (as in the Nginx sample below). Private ranges (10/8, 172.16/12, 192.168/16, 169.254/16) are deliberately not trusted, because any client on the same LAN, VPN or container network could then forge `X-Forwarded-For` and bypass the login, reset and Google sign-in rate limits.
+
+When the proxy is **not** on the same host, set `TRUSTED_PROXIES` to a regex matching only the proxy's own address(es), as the app sees them (Tomcat matches the whole address, so no `^`/`$` is needed):
+
+| Setup | Address the app sees | Example |
+|---|---|---|
+| Proxy on another machine | the proxy's IP | `TRUSTED_PROXIES=10\.0\.0\.5` |
+| Proxy in another container on a Docker network | the proxy container's IP on that network (give it a fixed `ipv4_address`) | `TRUSTED_PROXIES=172\.20\.0\.10` |
+| Host proxy → app in a container with published ports | the Docker bridge gateway (Docker NATs the connection), e.g. `172.17.0.1` | `TRUSTED_PROXIES=172\.17\.0\.1` |
+
+In the last case every connection that reaches the published port arrives from the gateway, so publish the port on loopback only (`127.0.0.1:8080:8080`) so that no other client can reach it directly. Never set `TRUSTED_PROXIES` to a whole private range.
 
 ### Sample Nginx Configuration Snippet
 ```nginx
