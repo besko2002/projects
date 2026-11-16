@@ -92,6 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       const res = await authApi.login(payload);
       setTokenState(res.accessToken);
       setUser(res.user);
+      setNotice(null);
     } finally {
       setIsLoading(false);
     }
@@ -103,6 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       const res = await authApi.register(payload);
       setTokenState(res.accessToken);
       setUser(res.user);
+      setNotice(null);
     } finally {
       setIsLoading(false);
     }
@@ -114,9 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       const res = await authApi.loginWithGoogle({ idToken });
       setTokenState(res.accessToken);
       setUser(res.user);
-      if (res.notice) {
-        setNotice(res.notice);
-      }
+      setNotice(res.notice ?? null);
     } finally {
       setIsLoading(false);
     }
@@ -131,6 +131,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       setUser(null);
       setToken(null);
       setTokenState(null);
+      // CB-38: an account notice belongs to the session it was issued for, never the next visitor's.
+      setNotice(null);
       setIsLoading(false);
     }
   };

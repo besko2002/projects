@@ -154,9 +154,7 @@ export function MovieDetailPage(): React.JSX.Element {
     );
   }
 
-  const encodedPosterUrl = movie.posterUrl
-    ? encodeURI(movie.posterUrl).replace(/"/g, '\\"')
-    : null;
+  const posterUrl = movie.posterUrl || null;
 
   return (
     <div className="screen screen-container">
@@ -175,22 +173,13 @@ export function MovieDetailPage(): React.JSX.Element {
         <div className="movie-detail-layout" style={{ marginTop: 'var(--space-6)' }}>
           {/* Movie Poster & Metadata */}
           <div className="ticket" style={{ alignSelf: 'start' }}>
-            <div
-              className="poster p1"
-              style={
-                encodedPosterUrl
-                  ? {
-                      backgroundImage: `url("${encodedPosterUrl}")`,
-                      backgroundSize: 'cover',
-                      backgroundPosition: 'center',
-                    }
-                  : undefined
-              }
-            >
-              {!encodedPosterUrl && (
+            <div className="poster p1">
+              {posterUrl ? (
+                <img className="poster-img" src={posterUrl} alt="" />
+              ) : (
                 <>
                   <span className="stamp">{movie.genres?.[0]?.name || 'FEATURE'}</span>
-                  <b>{movie.title}</b>
+                  <b aria-hidden="true">{movie.title}</b>
                 </>
               )}
             </div>

@@ -13,6 +13,10 @@ public interface PasswordResetTokenRepository extends JpaRepository<PasswordRese
 
     Optional<PasswordResetToken> findByTokenHash(String tokenHash);
 
+    /** The owning user's id, read without locking and without loading the token into the session. */
+    @Query("select t.user.id from PasswordResetToken t where t.tokenHash = :tokenHash")
+    Optional<Long> findUserIdByTokenHash(@Param("tokenHash") String tokenHash);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select t from PasswordResetToken t where t.tokenHash = :tokenHash")
     Optional<PasswordResetToken> findByTokenHashForUpdate(@Param("tokenHash") String tokenHash);

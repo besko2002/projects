@@ -172,7 +172,7 @@ class GoogleAuthIntegrationTest {
     void linkingAnAccountThatHadAPasswordEmailsTheOwnerAfterCommit() throws Exception {
         String email = "notify-link-" + System.nanoTime() + "@cinema.test";
         User initial = userRepository.saveAndFlush(new User("Notify Me", email, "hashed-pass", Role.USER));
-        capturedEmails.googleReplacedNotifications.clear();
+        capturedEmails.clear();
 
         mockMvc.perform(post("/api/auth/google")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -183,6 +183,9 @@ class GoogleAuthIntegrationTest {
 
         assertThat(capturedEmails.googleReplacedNotifications).containsExactly(email);
         assertThat(userRepository.findById(initial.getId()).orElseThrow().getPasswordHash()).isNull();
+        // CB-34: the notice email is handed to the task executor, never sent on the request thread
+        // (a slow Resend call would otherwise hold the request and its DB connection for ~20 s).
+        assertThat(capturedEmails.googleReplacedViaExecutor).containsExactly(true);
     }
 
     @Test
@@ -206,6 +209,23 @@ class GoogleAuthIntegrationTest {
 
         assertThat(output.getAll()).contains("Registered new user via Google");
         assertThat(output.getAll()).doesNotContain(newEmail).doesNotContain(linkEmail);
+    }
+
+    @Test
+    @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+    void aDuplicateEmailInsertNeverLogsOrReportsTheEmail(
+            org.springframework.boot.test.system.CapturedOutput output) {
+        // CB-32: the PostgreSQL detail line ("Key (email)=(...) already exists") was logged by
+        // Hibernate and repeated in the exception message.
+        String email = "dup-log-" + System.nanoTime() + "@cinema.test";
+        userRepository.saveAndFlush(new User("First", email, "hashed", Role.USER));
+        Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() ->
+                userRepository.saveAndFlush(new User("Second", email, "hashed", Role.USER)));
+        assertThat(failure).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            assertThat(String.valueOf(t.getMessage())).as("message of %s", t.getClass()).doesNotContain(email);
+        }
+        assertThat(output.getAll()).doesNotContain(email);
     }
 
     @RepeatedTest(5)

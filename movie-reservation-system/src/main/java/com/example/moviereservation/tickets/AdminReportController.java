@@ -42,13 +42,14 @@ public class AdminReportController {
     @GetMapping("/reports/revenue")
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Revenue of a time window (ADMIN)",
-            description = "Sums total_price over the tickets that are PAID and whose paid_at falls into "
-                    + "[from, to). Refunded tickets are not PAID anymore, so they are never part of "
-                    + "grossRevenue; they are reported separately as refundedTickets/refundedAmount for the "
-                    + "same paid_at window, which is why netRevenue equals grossRevenue (subtracting the "
-                    + "refunds again would count them twice). PENDING_PAYMENT, CANCELLED and EXPIRED tickets "
-                    + "carry no money and are ignored. Both bounds are optional ISO-8601 instants: from "
-                    + "defaults to 30 days before to, and to defaults to now. byDay groups the payments by "
+            description = "grossRevenue sums total_price over every ticket captured (paid_at set) inside "
+                    + "[from, to), whatever its status is now, so a sale that was refunded later still counts "
+                    + "as gross for the window it was paid in (paidTickets counts them). refundedAmount sums "
+                    + "the refund deltas processed inside the same window, by their own processing time, and "
+                    + "refundedTickets counts the distinct tickets they belong to. netRevenue is grossRevenue "
+                    + "minus refundedAmount, so it can be negative when older sales are refunded in this "
+                    + "window. Tickets that were never paid (no paid_at) carry no money. Both bounds are optional ISO-8601 instants: from defaults to 30 days before to, "
+                    + "and to defaults to now. byMovie groups gross by movie (richest first) and byDay by "
                     + "calendar day of the business zone app.schedule.zone (UTC by default).")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "The revenue report"),

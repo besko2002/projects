@@ -135,9 +135,12 @@ public class PasswordResetService {
                     try {
                         emailSender.sendPasswordReset(toEmail, resetLink);
                         // Once new email has been accepted by the email provider, invalidate older tokens
+                        // Same lock order as resetPassword: the user row before any of its tokens.
                         if (transactionTemplate != null) {
-                            transactionTemplate.executeWithoutResult(status ->
-                                    tokenRepository.invalidatePriorTokensForUser(userId, tokenId));
+                            transactionTemplate.executeWithoutResult(status -> {
+                                userRepository.findByIdForUpdate(userId);
+                                tokenRepository.invalidatePriorTokensForUser(userId, tokenId);
+                            });
                         } else {
                             tokenRepository.invalidatePriorTokensForUser(userId, tokenId);
                         }
@@ -174,6 +177,13 @@ public class PasswordResetService {
         }
 
         String tokenHash = sha256(rawToken.trim());
+        // Lock order (CB-33): user row first, then the token. Two different valid links of one user
+        // used at once used to lock their own token rows and then each other's (deadlock -> 5xx);
+        // now the second waits on the user row and then finds its link invalidated.
+        Optional<Long> ownerId = tokenRepository.findUserIdByTokenHash(tokenHash);
+        if (ownerId.isEmpty() || userRepository.findByIdForUpdate(ownerId.get()).isEmpty()) {
+            throw new BadRequestException("Invalid or expired password reset token");
+        }
         Optional<PasswordResetToken> tokenOpt = tokenRepository.findByTokenHashForUpdate(tokenHash);
 
         if (tokenOpt.isEmpty()) {

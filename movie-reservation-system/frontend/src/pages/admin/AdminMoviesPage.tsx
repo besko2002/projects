@@ -491,7 +491,7 @@ export function AdminMoviesPage(): React.JSX.Element {
                   <td style={{ padding: '12px 16px', fontSize: '14px' }}>
                     {m.durationMinutes} min
                   </td>
-                  <td style={{ padding: '12px 16px', fontSize: '14px', color: 'var(--ink-light)' }}>
+                  <td style={{ padding: '12px 16px', fontSize: '14px', color: 'var(--ink-soft)' }}>
                     {m.releaseDate || '—'}
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'right' }}>

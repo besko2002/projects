@@ -384,6 +384,12 @@ describe('CB-5: Timezone-Safe Bulk Scheduler & Slot Results', () => {
       totalPages: 1,
       last: true,
     });
+    // The page converts wall-clock times in the cinema zone and blocks scheduling until it is known;
+    // this test plans in the browser zone, so the cinema is placed there.
+    vi.mocked(schedulesApi.getScheduleSettings).mockResolvedValue({
+      zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      bufferMinutes: 15,
+    });
 
     const baseDate = new Date();
     baseDate.setDate(baseDate.getDate() + 10);

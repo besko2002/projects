@@ -31,9 +31,7 @@ export function MovieCard({
       ? Math.min(...activeSchedules.map((s) => s.basePrice))
       : null;
 
-  const encodedPosterUrl = movie.posterUrl
-    ? encodeURI(movie.posterUrl).replace(/"/g, '\\"')
-    : null;
+  const posterUrl = movie.posterUrl || null;
 
   return (
     <article className="ticket movie-card" aria-label={movie.title}>
@@ -43,19 +41,11 @@ export function MovieCard({
         className="ticket-link"
         style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
       >
-        <div
-          className={`poster p${colorIndex}`}
-          style={
-            encodedPosterUrl
-              ? {
-                  backgroundImage: `url("${encodedPosterUrl}")`,
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                }
-              : undefined
-          }
-        >
-          {!encodedPosterUrl && (
+        <div className={`poster p${colorIndex}`}>
+          {posterUrl ? (
+            // An <img> takes the URL as-is: no CSS url() escaping and no double-encoded "%" (CB-38).
+            <img className="poster-img" src={posterUrl} alt="" loading="lazy" />
+          ) : (
             <div className="poster-placeholder" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'flex-start', height: '100%' }}>
               <span className="stamp">{primaryGenre || 'FEATURE'}</span>
             </div>

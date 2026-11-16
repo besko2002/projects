@@ -102,4 +102,21 @@ class StartingCatalogueSeederTest {
         verify(genres, never()).createGenre(any());
         verify(movies, never()).createMovie(any());
     }
+
+    @Test
+    void aFailedSeedOfAnEmptyInstallIsNotSwallowed() {
+        // CB-36: the error was logged and seedIfEmpty returned false, so the app started with an
+        // empty catalogue as if nothing had happened.
+        when(genres.getAllGenres()).thenReturn(List.of());
+        when(genres.createGenre(any())).thenAnswer(call -> new GenreDto(1L, ((GenreRequest) call.getArgument(0)).name()));
+        when(movies.listMovies(any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalArgumentException("movie lookup failed"));
+
+        Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(seeder::seedIfEmpty);
+
+        assertThat(thrown).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Starting catalogue seeding failed")
+                .hasRootCauseMessage("movie lookup failed");
+        assertThat(events).contains("rollback").doesNotContain("commit");
+    }
 }

@@ -8,7 +8,7 @@ import type { GenreDto, MovieDto, MovieSummary } from '../types/movie';
 import type { ScheduleSummary } from '../types/schedule';
 import * as moviesApi from '../api/moviesApi';
 import * as schedulesApi from '../api/schedulesApi';
-import { formatDuration, formatTime, getUpcomingDays } from '../utils/dateUtils';
+import { formatDateShort, formatDuration, formatTime, getUpcomingDays } from '../utils/dateUtils';
 import { formatMoney } from '../utils/moneyUtils';
 
 function getFeaturedTimingBadge(showtime: ScheduleSummary | null): string {
@@ -31,7 +31,8 @@ function getFeaturedTimingBadge(showtime: ScheduleSummary | null): string {
   if (isTomorrow) {
     return 'TOMORROW';
   }
-  return 'UPCOMING';
+  // CB-38: a later showtime names its day, so the time next to it is never read as today's.
+  return formatDateShort(showtime.startTime).toUpperCase();
 }
 
 export function HomePage(): React.JSX.Element {
@@ -261,19 +262,14 @@ export function HomePage(): React.JSX.Element {
         {/* Featured Letter-board Banner */}
         {featuredMovie && (
           <section className="feature" aria-label="Featured Movie">
-            <div
-              className="art p1"
-              style={
-                featuredMovie.posterUrl
-                  ? {
-                      backgroundImage: `url("${encodeURI(featuredMovie.posterUrl)}")`,
-                      backgroundSize: 'cover',
-                      backgroundPosition: 'center',
-                    }
-                  : undefined
-              }
-            >
-              {!featuredMovie.posterUrl && <b>{featuredMovie.title}</b>}
+            <div className="art p1">
+              {featuredMovie.posterUrl ? (
+                // An <img> takes the URL as-is: no CSS url() escaping and no double-encoded "%" (CB-38).
+                <img className="art-img" src={featuredMovie.posterUrl} alt="" />
+              ) : (
+                // The title is the heading next to this; the artwork slot shows a plain marquee mark.
+                <b aria-hidden="true">Feature Presentation</b>
+              )}
             </div>
             <div className="body">
               <div className="board" aria-label="Featured Showtime Details">

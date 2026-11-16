@@ -75,33 +75,39 @@ public class StartingCatalogueSeeder {
      * @return {@code true} if starting content was seeded, {@code false} if skipped
      */
     public synchronized boolean seedIfEmpty() {
+        java.util.concurrent.atomic.AtomicBoolean lockTaken = new java.util.concurrent.atomic.AtomicBoolean();
         try {
-            Boolean result = transactionTemplate.execute(status -> {
-                Boolean locked = jdbcTemplate.queryForObject(
+            return Boolean.TRUE.equals(transactionTemplate.execute(status -> {
+                Boolean acquired = jdbcTemplate.queryForObject(
                         "SELECT pg_try_advisory_xact_lock(84729104)", Boolean.class);
-                if (!Boolean.TRUE.equals(locked)) {
+                if (!Boolean.TRUE.equals(acquired)) {
                     log.info("Another instance holds the starting catalogue seeder lock; skipping.");
                     return false;
                 }
+                lockTaken.set(true);
                 return doSeedIfEmpty();
-            });
-            return Boolean.TRUE.equals(result);
-        } catch (Exception ex) {
-            log.error("Catalogue seeding transaction aborted: {}", ex.getMessage());
-            return false;
+            }));
+        } catch (RuntimeException ex) {
+            if (!lockTaken.get()) {
+                // Could not open the transaction or take the lock: not acquired, nothing was seeded.
+                log.error("Catalogue seeding skipped: could not take the seeder lock: {}", ex.getMessage());
+                return false;
+            }
+            // CB-36: never start silently with an empty catalogue. The transaction was rolled back
+            // (nothing partial, no "seeded" marker), so the next start tries again.
+            log.error("Starting catalogue seeding failed and was rolled back; the application will not start "
+                    + "with an empty catalogue. Fix the cause and restart.", ex);
+            throw new IllegalStateException("Starting catalogue seeding failed: " + ex.getMessage(), ex);
         }
     }
 
     private boolean doSeedIfEmpty() {
-        try {
-            Integer count = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM app_metadata WHERE key = 'starting_catalogue_seeded'", Integer.class);
-            if (count != null && count > 0) {
-                log.debug("Starting catalogue seeder has already run according to app_metadata; skipping.");
-                return false;
-            }
-        } catch (Exception ex) {
-            log.warn("Could not check app_metadata for starting catalogue seeder: {}", ex.getMessage());
+        // A failed check aborts the transaction anyway, so it is not swallowed here.
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM app_metadata WHERE key = 'starting_catalogue_seeded'", Integer.class);
+        if (count != null && count > 0) {
+            log.debug("Starting catalogue seeder has already run according to app_metadata; skipping.");
+            return false;
         }
 
         if (movieService.count() > 0 || theaterService.count() > 0 || !genreService.getAllGenres().isEmpty()) {
@@ -122,13 +128,10 @@ public class StartingCatalogueSeeder {
     }
 
     private void recordMetadata(String status) {
-        try {
-            jdbcTemplate.update(
-                    "INSERT INTO app_metadata (key, value) VALUES ('starting_catalogue_seeded', ?) ON CONFLICT (key) DO NOTHING",
-                    status);
-        } catch (Exception ex) {
-            log.error("Failed to record starting_catalogue_seeded in app_metadata: {}", ex.getMessage());
-        }
+        // Not swallowed: a failed insert aborts the transaction, so the commit would fail anyway.
+        jdbcTemplate.update(
+                "INSERT INTO app_metadata (key, value) VALUES ('starting_catalogue_seeded', ?) ON CONFLICT (key) DO NOTHING",
+                status);
     }
 
     private Map<String, Long> ensureGenres() {

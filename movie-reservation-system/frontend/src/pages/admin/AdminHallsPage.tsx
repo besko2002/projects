@@ -466,7 +466,7 @@ export function AdminHallsPage(): React.JSX.Element {
                   <td style={{ padding: '12px 16px', fontWeight: 'bold', fontSize: '15px' }}>
                     {hall.name}
                   </td>
-                  <td style={{ padding: '12px 16px', color: 'var(--ink-light)', fontSize: '14px' }}>
+                  <td style={{ padding: '12px 16px', color: 'var(--ink-soft)', fontSize: '14px' }}>
                     {hall.location || '—'}
                   </td>
                   <td style={{ padding: '12px 16px', fontFamily: 'monospace', fontSize: '14px' }}>

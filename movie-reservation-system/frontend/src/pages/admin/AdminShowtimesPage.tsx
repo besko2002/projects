@@ -30,6 +30,10 @@ export function AdminShowtimesPage(): React.JSX.Element {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   // Showtimes are planned in the cinema's own zone (app.schedule.zone), not the admin's browser zone.
   const [cinemaZone, setCinemaZone] = useState<string | null>(null);
+  // CB-38: until the cinema zone is known, wall-clock times cannot be converted safely, so creating
+  // showtimes is blocked instead of silently using this browser's zone.
+  const [zoneStatus, setZoneStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const [zoneRetry, setZoneRetry] = useState(0);
 
   // Mode: list / single / bulk
   const [activeTab, setActiveTab] = useState<'single' | 'bulk'>('single');
@@ -72,19 +76,40 @@ export function AdminShowtimesPage(): React.JSX.Element {
     Promise.resolve()
       .then(() => schedulesApi.getScheduleSettings())
       .then((settings) => {
-        if (!ignore && isValidTimeZone(settings?.zone)) setCinemaZone(settings.zone);
+        if (ignore) return;
+        if (isValidTimeZone(settings?.zone)) {
+          setCinemaZone(settings.zone);
+          setZoneStatus('ready');
+        } else {
+          setZoneStatus('failed');
+        }
       })
       .catch(() => {
-        // Fall back to the browser zone; the form says which zone is in use.
+        if (!ignore) setZoneStatus('failed');
       });
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [zoneRetry]);
 
-  const zoneNote = cinemaZone
-    ? `Times are cinema time (${cinemaZone}).`
-    : 'Cinema time zone unavailable; times use this browser\'s time zone.';
+  const zoneReady = zoneStatus === 'ready' && cinemaZone !== null;
+  const retryZone = () => {
+    setZoneStatus('loading');
+    setZoneRetry((n) => n + 1);
+  };
+  const zoneNote =
+    zoneStatus === 'ready' && cinemaZone ? (
+      `Times are cinema time (${cinemaZone}).`
+    ) : zoneStatus === 'loading' ? (
+      'Loading the cinema time zone…'
+    ) : (
+      <span role="alert" style={{ color: 'var(--red-deep)' }}>
+        Could not load the cinema time zone, so times cannot be converted and showtimes cannot be created.{' '}
+        <button type="button" className="btn-ghost" onClick={retryZone} style={{ padding: '0 6px' }}>
+          Retry
+        </button>
+      </span>
+    );
   const zoneOption = cinemaZone ? { timeZone: cinemaZone } : {};
 
   // Initial load of movies, theaters and initial schedules
@@ -169,7 +194,7 @@ export function AdminShowtimesPage(): React.JSX.Element {
 
   const handleSingleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedMovieId || !selectedTheaterId || !startDateTime) return;
+    if (!selectedMovieId || !selectedTheaterId || !startDateTime || !zoneReady) return;
 
     if (vipPrice < basePrice) {
       setError('VIP ticket price cannot be lower than Base ticket price.');
@@ -211,7 +236,7 @@ export function AdminShowtimesPage(): React.JSX.Element {
 
   const handleBulkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!bulkMovieId || !bulkTheaterId || !bulkStartDate || !bulkEndDate) return;
+    if (!bulkMovieId || !bulkTheaterId || !bulkStartDate || !bulkEndDate || !zoneReady) return;
 
     if (bulkStartDate > bulkEndDate) {
       setError('End Date cannot be before Start Date.');
@@ -642,7 +667,7 @@ export function AdminShowtimesPage(): React.JSX.Element {
                     fontSize: '14px',
                   }}
                 />
-                <small style={{ display: 'block', marginTop: '4px', color: 'var(--ink-light)' }}>
+                <small data-testid="zone-note" style={{ display: 'block', marginTop: '4px', color: 'var(--ink-soft)' }}>
                   {zoneNote}
                 </small>
               </div>
@@ -699,7 +724,7 @@ export function AdminShowtimesPage(): React.JSX.Element {
                 <button
                   type="submit"
                   className="btn red"
-                  disabled={isSaving || !selectedMovieId || !selectedTheaterId || !startDateTime}
+                  disabled={isSaving || !zoneReady || !selectedMovieId || !selectedTheaterId || !startDateTime}
                 >
                   {isSaving ? 'Scheduling…' : 'Schedule Showtime'}
                 </button>
@@ -837,7 +862,7 @@ export function AdminShowtimesPage(): React.JSX.Element {
                     fontSize: '14px',
                   }}
                 />
-                <small style={{ display: 'block', marginTop: '4px', color: 'var(--ink-light)' }}>
+                <small data-testid="zone-note" style={{ display: 'block', marginTop: '4px', color: 'var(--ink-soft)' }}>
                   {zoneNote}
                 </small>
                 <span className="soft" style={{ fontSize: '12px' }}>
@@ -903,7 +928,7 @@ export function AdminShowtimesPage(): React.JSX.Element {
                   <button
                     type="submit"
                     className="btn teal"
-                    disabled={isBulkRunning || !bulkMovieId || !bulkTheaterId || !bulkStartDate || !bulkEndDate}
+                    disabled={isBulkRunning || !zoneReady || !bulkMovieId || !bulkTheaterId || !bulkStartDate || !bulkEndDate}
                   >
                     {isBulkRunning ? 'Generating Schedules…' : 'Run Bulk Generation'}
                   </button>

@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -23,6 +24,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 /**
  * Public API of the users module: registration, login and user lookup.
@@ -37,6 +40,11 @@ public class UserService {
     /** Deliberately identical for "unknown email" and "wrong password" so the API leaks nothing. */
     private static final String INVALID_CREDENTIALS = "Invalid email or password";
 
+    /** PostgreSQL names of the unique constraints on users (V2 email UNIQUE, V12 google_sub UNIQUE). */
+    static final String EMAIL_UNIQUE = "users_email_key";
+    static final String GOOGLE_SUB_UNIQUE = "users_google_sub_key";
+    private static final String UNIQUE_VIOLATION = "23505";
+
     /** BCrypt only uses the first 72 bytes and Spring Security rejects anything longer. */
     private static final int BCRYPT_MAX_PASSWORD_BYTES = 72;
 
@@ -44,6 +52,7 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final ObjectProvider<EmailSender> emailSenderProvider;
+    private final Executor emailExecutor;
 
     /** Checked against when the email is unknown, so both failure paths cost one BCrypt comparison. */
     private final String dummyPasswordHash;
@@ -52,16 +61,23 @@ public class UserService {
     public UserService(UserRepository userRepository,
                        PasswordEncoder passwordEncoder,
                        JwtService jwtService,
-                       ObjectProvider<EmailSender> emailSenderProvider) {
+                       ObjectProvider<EmailSender> emailSenderProvider,
+                       @Qualifier("applicationTaskExecutor") ObjectProvider<Executor> taskExecutor) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.emailSenderProvider = emailSenderProvider;
+        Executor executor = taskExecutor == null ? null : taskExecutor.getIfAvailable();
+        this.emailExecutor = executor != null ? executor : Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "account-notice-email");
+            t.setDaemon(true);
+            return t;
+        });
         this.dummyPasswordHash = passwordEncoder.encode("dummy-password-for-timing-equalisation");
     }
 
     public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService) {
-        this(userRepository, passwordEncoder, jwtService, null);
+        this(userRepository, passwordEncoder, jwtService, null, null);
     }
 
     /** Creates a {@link Role#USER} account and returns a freshly issued token. */
@@ -79,8 +95,12 @@ public class UserService {
         try {
             user = userRepository.saveAndFlush(user);
         } catch (DataIntegrityViolationException ex) {
-            // Unique index is the final arbiter when two registrations race.
-            throw new ConflictException("Email is already registered");
+            // Unique index is the final arbiter when two registrations race. Any other integrity
+            // error is a real fault, not a duplicate email, and is not reported as one.
+            if (isUniqueViolationOf(ex, EMAIL_UNIQUE)) {
+                throw new ConflictException("Email is already registered");
+            }
+            throw ex;
         }
         log.info("Registered user id={} role={}", user.getId(), user.getRole());
         return issueToken(user);
@@ -139,28 +159,7 @@ public class UserService {
                     user.setPasswordHash(null);
                     user.revokeTokens();
                     log.info("Cleared password and revoked sessions on Google link for user id={}", user.getId());
-                    String targetEmail = user.getEmail();
-                    if (emailSenderProvider != null && emailSenderProvider.getIfAvailable() != null) {
-                        EmailSender sender = emailSenderProvider.getIfAvailable();
-                        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-                            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                                @Override
-                                public void afterCommit() {
-                                    try {
-                                        sender.sendPasswordReplacedByGoogleNotification(targetEmail);
-                                    } catch (Exception ex) {
-                                        log.warn("Failed to dispatch password replaced notification to {}: {}", ResendEmailSender.maskEmail(targetEmail), ex.getMessage());
-                                    }
-                                }
-                            });
-                        } else {
-                            try {
-                                sender.sendPasswordReplacedByGoogleNotification(targetEmail);
-                            } catch (Exception ex) {
-                                log.warn("Failed to dispatch password replaced notification to {}: {}", ResendEmailSender.maskEmail(targetEmail), ex.getMessage());
-                            }
-                        }
-                    }
+                    notifyPasswordReplacedAfterCommit(user.getEmail());
                 }
                 user.setGoogleSub(payload.sub());
                 user = userRepository.saveAndFlush(user);
@@ -179,7 +178,10 @@ public class UserService {
                     user = userRepository.saveAndFlush(user);
                 } catch (DataIntegrityViolationException ex) {
                     // Do not query the database within the aborted transaction, which causes 500 error.
-                    // The driver message repeats the duplicate key value (the email), so it is not logged.
+                    // Only a race on the same email/Google subject is retried; anything else is a fault.
+                    if (!isUniqueViolationOf(ex, EMAIL_UNIQUE, GOOGLE_SUB_UNIQUE)) {
+                        throw ex;
+                    }
                     log.warn("Unique constraint violation registering user via Google email={}", ResendEmailSender.maskEmail(email));
                     throw new ConcurrentGoogleSignUpException();
                 }
@@ -235,6 +237,44 @@ public class UserService {
         }
     }
 
+    /**
+     * Emails the owner that Google replaced their password (CB-25), after the commit and on the task
+     * executor (CB-34): a slow or failing email provider never holds the request thread or its
+     * database connection, and a rolled-back link sends nothing.
+     */
+    private void notifyPasswordReplacedAfterCommit(String targetEmail) {
+        EmailSender sender = emailSenderProvider == null ? null : emailSenderProvider.getIfAvailable();
+        if (sender == null) {
+            return;
+        }
+        Runnable send = () -> {
+            try {
+                sender.sendPasswordReplacedByGoogleNotification(targetEmail);
+            } catch (Exception ex) {
+                log.warn("Failed to dispatch password replaced notification to {}: {}",
+                        ResendEmailSender.maskEmail(targetEmail), ex.getMessage());
+            }
+        };
+        Runnable dispatch = () -> {
+            try {
+                emailExecutor.execute(send);
+            } catch (RuntimeException rejected) {
+                log.warn("Could not queue password replaced notification to {}: {}",
+                        ResendEmailSender.maskEmail(targetEmail), rejected.getMessage());
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    dispatch.run();
+                }
+            });
+        } else {
+            dispatch.run();
+        }
+    }
+
     private AuthResponse issueToken(User user) {
         return issueToken(user, null);
     }
@@ -255,6 +295,29 @@ public class UserService {
         }
         int endIndex = name.offsetByCodePoints(0, maxCodePoints);
         return name.substring(0, endIndex);
+    }
+
+    /**
+     * True when {@code ex} is a unique violation (SQLSTATE 23505) of one of the named constraints.
+     * The constraint name comes from Hibernate's dialect-specific extraction (present in the message
+     * even with {@code logServerErrorDetail=false}, which only drops the DETAIL line with the values).
+     */
+    static boolean isUniqueViolationOf(DataIntegrityViolationException ex, String... constraints) {
+        for (Throwable t = ex; t != null && t.getCause() != t; t = t.getCause()) {
+            if (t instanceof org.hibernate.exception.ConstraintViolationException cve) {
+                String constraint = cve.getConstraintName();
+                if (!UNIQUE_VIOLATION.equals(cve.getSQLState()) || constraint == null) {
+                    return false;
+                }
+                for (String name : constraints) {
+                    if (name.equalsIgnoreCase(constraint)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+        return false;
     }
 
     private static boolean exceedsBcryptLimit(String rawPassword) {

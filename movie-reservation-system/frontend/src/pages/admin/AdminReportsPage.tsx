@@ -675,7 +675,7 @@ export function AdminReportsPage(): React.JSX.Element {
                         <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 'bold', fontFamily: 'monospace' }}>
                           ${Number(t.totalPrice || 0).toFixed(2)}
                         </td>
-                        <td style={{ padding: '10px 14px', fontSize: '12px', color: 'var(--ink-light)' }}>
+                        <td style={{ padding: '10px 14px', fontSize: '12px', color: 'var(--ink-soft)' }}>
                           {new Date(t.createdAt).toLocaleString()}
                         </td>
                       </tr>

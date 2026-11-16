@@ -84,14 +84,28 @@ class PasswordResetIntegrationTest {
         @Bean(name = {"applicationTaskExecutor", "testEmailExecutor"})
         @Primary
         java.util.concurrent.Executor testEmailExecutor() {
-            return Runnable::run;
+            // Runs inline (deterministic tests) but marks the task, so a test can prove that work was
+            // handed to the task executor instead of running directly on the request thread.
+            return task -> {
+                IN_TASK_EXECUTOR.set(Boolean.TRUE);
+                try {
+                    task.run();
+                } finally {
+                    IN_TASK_EXECUTOR.remove();
+                }
+            };
         }
     }
+
+    /** True only while a task submitted to the test {@code applicationTaskExecutor} is running. */
+    static final ThreadLocal<Boolean> IN_TASK_EXECUTOR = ThreadLocal.withInitial(() -> Boolean.FALSE);
 
     static class CapturedEmailSender implements EmailSender {
         final Map<String, String> resetLinks = new ConcurrentHashMap<>();
         final List<String> notifications = new ArrayList<>();
         final List<String> googleReplacedNotifications = new ArrayList<>();
+        /** For each Google-replaced notification: was it sent from the task executor? */
+        final List<Boolean> googleReplacedViaExecutor = new ArrayList<>();
         volatile boolean failOnSend = false;
 
         @Override
@@ -115,11 +129,14 @@ class PasswordResetIntegrationTest {
         @Override
         public void sendPasswordReplacedByGoogleNotification(String toEmail) {
             googleReplacedNotifications.add(toEmail);
+            googleReplacedViaExecutor.add(IN_TASK_EXECUTOR.get());
         }
 
         void clear() {
             resetLinks.clear();
             notifications.clear();
+            googleReplacedNotifications.clear();
+            googleReplacedViaExecutor.clear();
         }
     }
 
@@ -373,6 +390,53 @@ class PasswordResetIntegrationTest {
         // Exactly one should succeed with 200, the other must fail with 400
         assertThat(successCount.get()).isEqualTo(1);
         assertThat(conflictOrBadRequestCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    void twoValidLinksOfOneUserUsedAtOnceNeverDeadlock() throws Exception {
+        // CB-33: each reset locked its own token row, then updated all the user's tokens, so two
+        // different valid links used at the same time locked each other's rows (deadlock -> 5xx).
+        for (int r = 0; r < 8; r++) {
+            final int round = r;
+            String email = "two-links-" + round + "-" + System.nanoTime() + "@cinema.test";
+            User user = userRepository.saveAndFlush(
+                    new User("Two Links", email, passwordEncoder.encode("Pass@1234"), Role.USER));
+            String[] raw = {"raw-a-" + System.nanoTime(), "raw-b-" + System.nanoTime()};
+            for (String token : raw) {
+                tokenRepository.saveAndFlush(new PasswordResetToken(user, PasswordResetService.sha256(token),
+                        java.time.OffsetDateTime.now().plusMinutes(30)));
+            }
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            java.util.concurrent.CyclicBarrier start = new java.util.concurrent.CyclicBarrier(2);
+            try {
+                List<Future<Integer>> results = new ArrayList<>();
+                for (int i = 0; i < 2; i++) {
+                    String token = raw[i];
+                    String password = "NewPass@" + i + "123";
+                    // A distinct client address per request keeps the per-IP reset limit out of the way.
+                    String clientIp = "198.19." + round + "." + (i + 1);
+                    results.add(executor.submit(() -> {
+                        start.await();
+                        return mockMvc.perform(post("/api/auth/reset-password")
+                                        .with(request -> {
+                                            request.setRemoteAddr(clientIp);
+                                            return request;
+                                        })
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content(objectMapper.writeValueAsString(new ResetPasswordRequest(token, password))))
+                                .andReturn().getResponse().getStatus();
+                    }));
+                }
+                List<Integer> statuses = new ArrayList<>();
+                for (Future<Integer> result : results) {
+                    statuses.add(result.get(30, TimeUnit.SECONDS));
+                }
+                // The first reset wins; it invalidates the other link, which then answers 400.
+                assertThat(statuses).as("round %d statuses %s", round, statuses).containsExactlyInAnyOrder(200, 400);
+            } finally {
+                executor.shutdownNow();
+            }
+        }
     }
 
     @Test

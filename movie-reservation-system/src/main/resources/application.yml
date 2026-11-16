@@ -7,6 +7,12 @@ spring:
     username: ${DB_USERNAME:movie}
     password: ${DB_PASSWORD:movie}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      data-source-properties:
+        # Keep PostgreSQL's DETAIL line (e.g. "Key (email)=(...) already exists") out of exception
+        # messages, so neither Hibernate's SQL error log nor any handler can print user data (CB-32).
+        # The structured error (SQLSTATE, constraint name) is still available to the code.
+        logServerErrorDetail: false
 
   jpa:
     hibernate:

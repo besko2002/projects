@@ -68,22 +68,46 @@ public class ResendEmailSender implements EmailSender {
         if (mailFrom == null || mailFrom.isBlank()) {
             return false;
         }
-        String address = mailFrom;
-        int start = address.indexOf('<');
-        int end = address.indexOf('>');
-        if (start != -1 && end > start) {
-            address = address.substring(start + 1, end);
-        }
-        String normalized = address.trim().toLowerCase(java.util.Locale.ROOT);
-        if (normalized.equals("noreply@cinebook.local")
-                || normalized.endsWith(".local")
-                || !normalized.contains("@")
-                || normalized.startsWith("@")
-                || normalized.endsWith("@")) {
+        String address = senderAddress(mailFrom);
+        if (address == null) {
             return false;
         }
-        String domain = normalized.substring(normalized.indexOf('@') + 1);
-        return domain.contains(".") && !domain.endsWith(".local");
+        String domain = address.substring(address.indexOf('@') + 1);
+        return !address.equals("noreply@cinebook.local") && !domain.endsWith(".local");
+    }
+
+    private static final java.util.regex.Pattern ADDRESS = java.util.regex.Pattern.compile(
+            "[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*"
+                    + "@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}");
+    /** {@code Name <address>}: the name is a quoted string, or plain text without {@code <>",;:@}. */
+    private static final java.util.regex.Pattern NAMED = java.util.regex.Pattern.compile(
+            "(?:\"[^\"\\\\]*\"|[^<>\",;:@]*)\\s*<([^<>]*)>");
+
+    /**
+     * The sender address of a {@code MAIL_FROM} value, lower-cased, or {@code null} when the value is
+     * not exactly one well-formed {@code address} or {@code Name <address>} (CB-36). Control
+     * characters (header injection), unbalanced brackets, lists and trailing text are rejected.
+     */
+    static String senderAddress(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (trimmed.isEmpty() || trimmed.chars().anyMatch(c -> c < 0x20 || c == 0x7f)) {
+            return null;
+        }
+        String address = trimmed;
+        if (trimmed.indexOf('<') >= 0 || trimmed.indexOf('>') >= 0) {
+            java.util.regex.Matcher named = NAMED.matcher(trimmed);
+            if (!named.matches()) {
+                return null;
+            }
+            address = named.group(1).trim();
+        }
+        if (!ADDRESS.matcher(address).matches()) {
+            return null;
+        }
+        return address.toLowerCase(java.util.Locale.ROOT);
     }
 
     @Override

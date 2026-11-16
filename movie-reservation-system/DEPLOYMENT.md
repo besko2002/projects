@@ -3,8 +3,11 @@
 This guide details the deployment architecture, configuration options, production readiness, and hosting requirements for CineBook (Movie Reservation System).
 
 > [!IMPORTANT]
-> **Live Public URL: Not deployed / not verified.**
-> All build pipelines, unified packaging, SPA static forwarding, environment configurations, and database migrations are implemented and verified locally: the full backend suite against native PostgreSQL, the frontend suite, and an isolated browser run with a Stripe TEST payment and refund. The container image was built with `docker build` from a normal development checkout (with `frontend/node_modules` present); the container itself has not been run against a real deployment. Live public cloud deployment is intentionally out of current scope awaiting host selection and budget approval from the project owner.
+> **Live public URL: none (not deployed).**
+>
+> What this repository can reproduce: the backend suite against native PostgreSQL (`python3 scripts/native.py test movies`), the frontend build, lint, tests and `npm audit`, and the CI check that the committed static bundle matches a fresh build.
+>
+> What it cannot reproduce: browser runs with a Stripe TEST payment and refund and a `docker build` from a development checkout were done by hand during review (November 2026) with scripts kept outside this repository, so treat them as reported, not as something the repository proves. The container image has never been run in a real deployment. A public deployment is out of scope until a host and budget are approved.
 
 ---
 
@@ -77,9 +80,9 @@ When the proxy is **not** on the same host, set `TRUSTED_PROXIES` to a regex mat
 |---|---|---|
 | Proxy on another machine | the proxy's IP | `TRUSTED_PROXIES=10\.0\.0\.5` |
 | Proxy in another container on a Docker network | the proxy container's IP on that network (give it a fixed `ipv4_address`) | `TRUSTED_PROXIES=172\.20\.0\.10` |
-| Host proxy → app in a container with published ports | the Docker bridge gateway (Docker NATs the connection), e.g. `172.17.0.1` | `TRUSTED_PROXIES=172\.17\.0\.1` |
+| Host proxy → app in a container with a published port | depends on the Docker setup: often the gateway of the container's network (find it with `docker network inspect <network>`), but with Docker's userland proxy or on Docker Desktop it can be another address; check the peer address the app really sees (for example `ss -tn` inside the container) | `TRUSTED_PROXIES=172\.18\.0\.1` (example only) |
 
-In the last case every connection that reaches the published port arrives from the gateway, so publish the port on loopback only (`127.0.0.1:8080:8080`) so that no other client can reach it directly. Never set `TRUSTED_PROXIES` to a whole private range.
+In the last case, publish the port on loopback only (`127.0.0.1:8080:8080`) so that only the host proxy can reach it, and verify the trusted address instead of assuming it. Never set `TRUSTED_PROXIES` to a whole private range.
 
 ### Sample Nginx Configuration Snippet
 ```nginx
@@ -127,7 +130,7 @@ For live payments or reviewer testing in hosted environments:
 | Environment Variable | Default / Example | Purpose | Required in Prod |
 | :--- | :--- | :--- | :---: |
 | `SPRING_PROFILES_ACTIVE` | `prod` | Spring profile to activate (`prod` enforces strong secrets guard) | **Yes** |
-| `SCHEDULE_ZONE` | `Africa/Cairo` | Cinema time zone; admin showtime entry and listing use it (default `UTC`) | Recommended |
+| `SCHEDULE_ZONE` | `Africa/Cairo` | Cinema time zone; admin showtime entry and listing use it (default `UTC`). The admin showtimes page refuses to create showtimes until it has loaded this zone | Recommended |
 | `SERVER_PORT` | `8080` | HTTP listening port (`8093` in local native development) | No |
 | `APP_BASE_URL` | `https://cinebook.example.com` | Public base URL used to construct Stripe checkout success/cancel return URLs | **Yes** |
 | `FRONTEND_BASE_URL` | `https://cinebook.example.com` | Public frontend URL used to construct password reset links (defaults to `APP_BASE_URL`) | No |
@@ -144,7 +147,10 @@ For live payments or reviewer testing in hosted environments:
 | `TICKET_CANCELLATION_CUTOFF_HOURS` | `2` | Hours before showtime cutoff for self-service refund | No |
 | `GOOGLE_CLIENT_ID` | `...apps.googleusercontent.com` | Google OAuth Web Client ID for Google Identity Services sign-in | Optional |
 | `RESEND_API_KEY` | `re_...` | Resend HTTPS API key for sending transactional password reset emails | Optional |
-| `MAIL_FROM` | `CineBook <noreply@yourdomain.com>` | Sender email header for password reset notifications | Optional |
+| `MAIL_FROM` | `CineBook <noreply@yourdomain.com>` | Sender for password reset emails: exactly `address` or `Name <address>` on a verified, non-`.local` domain. Anything else leaves password reset unavailable (503) | Optional |
+| `TRUSTED_PROXIES` | `10\.0\.0\.5` | Regex of reverse-proxy addresses allowed to set `X-Forwarded-For` in `prod` (default: loopback only, see section 2) | Only if the proxy is not on the same host |
+
+**Starting catalogue:** on a brand-new, empty database the app seeds 10 films, genres, 3 halls and 14 days of showtimes in one transaction. If that seeding fails, it is rolled back and the application refuses to start (the error is logged), instead of running with an empty catalogue; fix the cause and start again. A database that already has data, or that was seeded before, is never touched.
 
 ---
 

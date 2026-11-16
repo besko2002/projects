@@ -48,6 +48,13 @@ public class GoogleTokenVerifierImpl implements GoogleTokenVerifier {
     private Function<String, PublicKey> keyProvider;
     private final AtomicReference<Map<String, PublicKey>> publicKeysRef = new AtomicReference<>(Map.of());
     private final AtomicLong certsCachedAt = new AtomicLong(0);
+    /** Time of the last certificate fetch attempt, successful or not (0 = never). */
+    private final AtomicLong lastFetchAttemptAt = new AtomicLong(0);
+    /**
+     * Minimum gap between fetch attempts (CB-35). Without it, while Google is unreachable and the
+     * cache is empty, every sign-in started another 5 s fetch, one after another under the lock.
+     */
+    static final long FETCH_RETRY_BACKOFF_MS = 30_000;
     private final Object refreshLock = new Object();
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -228,6 +235,13 @@ public class GoogleTokenVerifierImpl implements GoogleTokenVerifier {
             if (now - certsCachedAt.get() < 60_000 && !publicKeysRef.get().isEmpty()) {
                 return;
             }
+            long lastAttempt = lastFetchAttemptAt.get();
+            if (lastAttempt != 0 && now - lastAttempt < FETCH_RETRY_BACKOFF_MS) {
+                // A fetch was just tried (possibly by the thread we waited for); fail fast instead
+                // of queueing another blocking fetch. The caller answers 401 for an unknown key.
+                return;
+            }
+            lastFetchAttemptAt.set(now);
 
             try {
                 HttpRequest request = HttpRequest.newBuilder()

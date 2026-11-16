@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +90,80 @@ def print_status(config: dict):
         print(f"  - {key}: {display}")
 
 
+_ADDRESS = re.compile(
+    r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*"
+    r"@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}")
+_NAMED = re.compile(r'(?:"[^"\\]*"|[^<>",;:@]*)\s*<([^<>]*)>')
+
+
+def sender_address(value: str):
+    """The address of a MAIL_FROM value, lower-cased, or None unless it is exactly one well-formed
+    'address' or 'Name <address>' (same rule as the app's ResendEmailSender.senderAddress)."""
+    trimmed = (value or '').strip()
+    if not trimmed or any(ord(c) < 0x20 or ord(c) == 0x7f for c in trimmed):
+        return None
+    address = trimmed
+    if '<' in trimmed or '>' in trimmed:
+        named = _NAMED.fullmatch(trimmed)
+        if not named:
+            return None
+        address = named.group(1).strip()
+    if not _ADDRESS.fullmatch(address):
+        return None
+    return address.lower()
+
+
+def _write_private(path: Path, text: str):
+    """Writes text to path via a new 0600 temp file in the same directory, fsync, atomic rename.
+    The data never sits in a file that is (or was) readable by others, whatever the umask or the
+    mode of a file already at that path."""
+    fd, temp_name = tempfile.mkstemp(prefix='.' + path.name + '.', suffix='.tmp', dir=str(path.parent))
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_name, path)
+    except BaseException:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _fsync_dir(directory: Path):
+    try:
+        fd = os.open(str(directory), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def save_config(config_path: Path, config: dict):
+    """Keeps movies.json.bak plus the 5 newest timestamped backups, then replaces the config
+    atomically. Every file is created 0600 before any data is written (CB-37)."""
+    if config_path.exists():
+        content = config_path.read_text(encoding='utf-8')
+        _write_private(config_path.with_suffix('.bak'), content)
+        _write_private(config_path.parent / f'{config_path.name}.bak.{time.time_ns()}', content)
+        existing_backups = sorted(config_path.parent.glob(f'{config_path.name}.bak.*'),
+                                  key=lambda p: p.stat().st_mtime, reverse=True)
+        for old_bak in existing_backups[5:]:
+            try:
+                old_bak.unlink()
+            except OSError:
+                pass
+    _write_private(config_path, json.dumps(config, indent=2))
+    _fsync_dir(config_path.parent)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Configure private settings for CineBook movie-reservation-system.")
     parser.add_argument("--status", action="store_true", help="Print configuration status without prompting")
@@ -137,13 +212,14 @@ def main():
     print(f"\n3. Mail Sender Address (MAIL_FROM) [Current: {current_mail_from or '<unset>'}]")
     new_mail_from = input("   Enter Mail From (e.g. CineBook <boxoffice@yourdomain.com>): ").strip()
     if new_mail_from:
-        addr = new_mail_from
-        if '<' in addr and '>' in addr:
-            addr = addr.split('<')[1].split('>')[0]
-        addr_clean = addr.strip().lower()
-        if addr_clean.endswith('.local') or '@cinebook.local' in addr_clean or not ('.' in addr_clean.split('@')[-1] if '@' in addr_clean else False):
-            print("   ⚠️  Warning: Resend rejects .local or unverified domains. Use a verified domain (or onboarding@resend.dev for testing).")
-        config["MAIL_FROM"] = new_mail_from
+        address = sender_address(new_mail_from)
+        if address is None:
+            print("   ✗ Not saved: use exactly one address, either 'boxoffice@yourdomain.com' or "
+                  "'CineBook <boxoffice@yourdomain.com>'. The previous value is kept.")
+        else:
+            if address.endswith('.local') or address == 'noreply@cinebook.local':
+                print("   ⚠️  Warning: Resend rejects .local or unverified domains. Use a verified domain (or onboarding@resend.dev for testing).")
+            config["MAIL_FROM"] = new_mail_from
 
     # App Base URL
     current_base_url = config.get("APP_BASE_URL", "")
@@ -152,40 +228,7 @@ def main():
     if new_base_url:
         config["APP_BASE_URL"] = new_base_url
 
-    # Write securely with timestamped backups, prune to keep 5 most recent, and atomic replace with fsync
-    if CONFIG_PATH.exists():
-        content = CONFIG_PATH.read_text(encoding='utf-8')
-        # Maintain default movies.json.bak
-        backup_path = CONFIG_PATH.with_suffix('.bak')
-        backup_path.write_text(content, encoding='utf-8')
-        backup_path.chmod(0o600)
-
-        # Timestamped backup
-        ts = int(time.time())
-        ts_backup = CONFIG_PATH.parent / f'movies.json.bak.{ts}'
-        ts_backup.write_text(content, encoding='utf-8')
-        ts_backup.chmod(0o600)
-
-        # Prune older timestamped backups, keeping 5 most recent
-        existing_backups = sorted(
-            CONFIG_PATH.parent.glob('movies.json.bak.*'),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True
-        )
-        for old_bak in existing_backups[5:]:
-            try:
-                old_bak.unlink()
-            except OSError:
-                pass
-
-    temp_path = CONFIG_PATH.with_suffix('.tmp')
-    with open(temp_path, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    temp_path.chmod(0o600)
-    temp_path.replace(CONFIG_PATH)
-    CONFIG_PATH.chmod(0o600)
+    save_config(CONFIG_PATH, config)
 
     print("\n✓ Configuration saved securely to ../.native/config/movies.json (mode 0600).")
     print_status(config)

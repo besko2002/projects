@@ -65,6 +65,46 @@ class ResendEmailSenderTest {
     }
 
     @Test
+    void malformedMailFromIsNeverConfigured() {
+        // CB-36: "Name <a@b.com" (no closing bracket) and similar values used to pass.
+        for (String from : new String[]{
+                "CineBook <onboarding@resend.dev",
+                "onboarding@resend.dev>",
+                "<onboarding@resend.dev",
+                "CineBook <onboarding@resend.dev> extra",
+                "CineBook <<onboarding@resend.dev>>",
+                "Cine<Book <onboarding@resend.dev>",
+                "onboarding@resend.dev, other@resend.dev",
+                "a@b@resend.dev",
+                "on boarding@resend.dev",
+                "onboarding@resend.dev\r\nBcc: x@evil.example",
+                "CineBook\n <onboarding@resend.dev>",
+                "onboarding@.resend.dev",
+                "onboarding@resend..dev",
+                "onboarding@-resend.dev",
+                "onboarding@resend.d",
+                "CineBook <>",
+                "CineBook"}) {
+            ResendEmailSender sender = new ResendEmailSender("re_test_123", from, objectMapper);
+            assertThat(sender.isConfigured()).as("MAIL_FROM %s", from).isFalse();
+        }
+    }
+
+    @Test
+    void wellFormedMailFromIsConfigured() {
+        for (String from : new String[]{
+                "onboarding@resend.dev",
+                "CineBook <onboarding@resend.dev>",
+                "CineBook Box Office <tickets@cine-book.co.uk>",
+                "\"CineBook, Box Office\" <tickets@cinebook.com>",
+                "<tickets@cinebook.com>",
+                "first.last+tag@mail.cinebook.com"}) {
+            ResendEmailSender sender = new ResendEmailSender("re_test_123", from, objectMapper);
+            assertThat(sender.isConfigured()).as("MAIL_FROM %s", from).isTrue();
+        }
+    }
+
+    @Test
     void throwsWhenResendApiReturnsNon2xxStatus() throws IOException, InterruptedException {
         HttpClient mockClient = mock(HttpClient.class);
         @SuppressWarnings("unchecked")
