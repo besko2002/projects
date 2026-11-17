@@ -68,6 +68,9 @@ class SecurityConfig {
                         // pre-flight from a disallowed origin is already rejected there.
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
                         .pathMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login").permitAll()
+                        // Stripe calls this itself and carries no JWT; payment-service authenticates
+                        // every delivery by its Stripe-Signature (HMAC over the raw body) instead.
+                        .pathMatchers(HttpMethod.POST, "/api/payments/stripe/webhook").permitAll()
                         // Public catalog: browsing products needs no account.
                         .pathMatchers(HttpMethod.GET, "/api/products/**").permitAll()
                         .pathMatchers("/actuator/health", "/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()

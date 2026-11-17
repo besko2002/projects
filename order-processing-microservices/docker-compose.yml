@@ -232,6 +232,8 @@ services:
       ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD:-order_local_dev_only}
       INVENTORY_BASE_URL: http://inventory-service:8083
       ORDER_SAGA_TIMEOUT: ${ORDER_SAGA_TIMEOUT:-PT2M}
+      # A customer at the hosted checkout gets this long to pay (>= PAYMENT_CHECKOUT_TTL).
+      ORDER_SAGA_PAYMENT_WINDOW: ${ORDER_SAGA_PAYMENT_WINDOW:-PT35M}
       ORDER_SAGA_REFUND_RETRY_INTERVAL: ${ORDER_SAGA_REFUND_RETRY_INTERVAL:-PT30S}
     ports: ["${BIND_ADDRESS:-127.0.0.1}:8082:8082"]
     depends_on: { postgres: { condition: service_healthy }, kafka: { condition: service_healthy }, auth-service: { condition: service_healthy } }
@@ -247,6 +249,16 @@ services:
       PAYMENT_DB_NAME: ${PAYMENT_DB_NAME:-payment_db}
       PAYMENT_DB_USER: ${PAYMENT_DB_USER:-payment_user}
       PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:-payment_local_dev_only}
+      # Provider selection (see payment-service application.yml): with STRIPE_SECRET_KEY (sk_test_
+      # only) set in the git-ignored .env, real Stripe Checkout in test mode; PAYMENT_PROVIDER=simulated
+      # selects the deterministic offline provider; with neither, payments are unavailable (never a
+      # fake success). Webhook secret: the whsec_ printed by `stripe listen` (see README).
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_CURRENCY: ${STRIPE_CURRENCY:-EUR}
+      STOREFRONT_BASE_URL: ${STOREFRONT_BASE_URL:-http://localhost:5179}
+      PAYMENT_CHECKOUT_TTL: ${PAYMENT_CHECKOUT_TTL:-PT30M}
       # The simulated provider - no acquirer is contacted, no money moves.
       PAYMENT_DECLINE_ABOVE: ${PAYMENT_DECLINE_ABOVE:-1000.00}
       PAYMENT_FAILURE_RATE: ${PAYMENT_FAILURE_RATE:-0}
@@ -284,7 +296,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_TIMEOUT: ${REDIS_TIMEOUT:-500ms}
       REDIS_CONNECT_TIMEOUT: ${REDIS_CONNECT_TIMEOUT:-500ms}
-      GATEWAY_CORS_ORIGINS: ${GATEWAY_CORS_ORIGINS:-http://localhost:5173}
+      GATEWAY_CORS_ORIGINS: ${GATEWAY_CORS_ORIGINS:-http://localhost:5179,http://localhost:5173}
       RATE_LIMIT_REPLENISH_RATE: ${RATE_LIMIT_REPLENISH_RATE:-10}
       RATE_LIMIT_BURST_CAPACITY: ${RATE_LIMIT_BURST_CAPACITY:-20}
       RATE_LIMIT_REQUESTED_TOKENS: ${RATE_LIMIT_REQUESTED_TOKENS:-1}

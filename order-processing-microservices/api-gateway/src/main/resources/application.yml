@@ -57,7 +57,7 @@ gateway:
     jwks-uri: ${AUTH_JWKS_URI:http://localhost:8081/.well-known/jwks.json}
     issuer: ${AUTH_JWT_ISSUER:order-processing-auth}
   cors:
-    allowed-origins: ${GATEWAY_CORS_ORIGINS:http://localhost:5173}
+    allowed-origins: ${GATEWAY_CORS_ORIGINS:http://localhost:5179,http://localhost:5173}
 
 management:
   tracing:
