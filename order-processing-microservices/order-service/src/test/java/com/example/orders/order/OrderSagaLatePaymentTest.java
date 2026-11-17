@@ -126,7 +126,8 @@ class OrderSagaLatePaymentTest extends OrderIntegrationTest {
         UUID orderId = placeOrder(UUID.randomUUID(), "119.00", 1, "corr-late-timeout");
 
         // The sweep cancelled this order with compensation; the charge has not been heard of yet.
-        assertThat(saga.timeOut(orderId, "Test: the sweep gave up")).isTrue();
+        assertThat(saga.timeOut(orderId, "Test: the sweep gave up",
+                OffsetDateTime.now(ZoneOffset.UTC))).isTrue();
         assertThat(order(orderId).getStatus()).isEqualTo(OrderStatus.CANCELLED);
         assertThat(countOutbox(orderId, "RefundPayment")).isZero();
 
@@ -253,7 +254,8 @@ class OrderSagaLatePaymentTest extends OrderIntegrationTest {
         // is for) — so the saga timeout has nothing to do with it: no re-command on the timeout's
         // clock, no cancellation (that would strand the refund, final states are not swept, and
         // tell the customer "cancelled" while the charge still stands).
-        assertThat(saga.timeOut(orderId, "Test: the sweep gave up on a waiting order")).isFalse();
+        assertThat(saga.timeOut(orderId, "Test: the sweep gave up on a waiting order",
+                OffsetDateTime.now(ZoneOffset.UTC))).isFalse();
         assertThat(order(orderId).getStatus()).isEqualTo(OrderStatus.CANCELLATION_PENDING);
         assertThat(countOutbox(orderId, "RefundPayment")).isEqualTo(1);
         // The deliberate retry path is the refund recovery, and it keeps to the retry interval: a

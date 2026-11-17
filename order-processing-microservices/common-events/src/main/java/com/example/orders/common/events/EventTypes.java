@@ -30,9 +30,11 @@ public final class EventTypes {
             Map.entry(CommitStock.class.getSimpleName(), CommitStock.class),
             Map.entry(ProcessPayment.class.getSimpleName(), ProcessPayment.class),
             Map.entry(RefundPayment.class.getSimpleName(), RefundPayment.class),
+            Map.entry(ExpirePayment.class.getSimpleName(), ExpirePayment.class),
             Map.entry(PaymentCompleted.class.getSimpleName(), PaymentCompleted.class),
             Map.entry(PaymentFailed.class.getSimpleName(), PaymentFailed.class),
-            Map.entry(PaymentRefunded.class.getSimpleName(), PaymentRefunded.class));
+            Map.entry(PaymentRefunded.class.getSimpleName(), PaymentRefunded.class),
+            Map.entry(PaymentAwaitingCustomer.class.getSimpleName(), PaymentAwaitingCustomer.class));
 
     private EventTypes() {
     }

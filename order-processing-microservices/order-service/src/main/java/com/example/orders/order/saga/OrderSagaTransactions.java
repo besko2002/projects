@@ -1,9 +1,11 @@
 package com.example.orders.order.saga;
 
 import com.example.orders.common.events.CommitStock;
+import com.example.orders.common.events.ExpirePayment;
 import com.example.orders.common.events.OrderCancelled;
 import com.example.orders.common.events.OrderConfirmed;
 import com.example.orders.common.events.OrderRejected;
+import com.example.orders.common.events.PaymentAwaitingCustomer;
 import com.example.orders.common.events.PaymentCompleted;
 import com.example.orders.common.events.PaymentFailed;
 import com.example.orders.common.events.PaymentRefunded;
@@ -195,6 +197,65 @@ public class OrderSagaTransactions {
     // ------------------------------------------------------------------ payment answers
 
     /**
+     * The charge cannot be taken automatically: a hosted checkout was opened and the customer has
+     * to pay. The URL is stored on the order so {@code GET /api/orders/{id}} can hand it to them
+     * ({@code paymentUrl}), and the payment's id is remembered so later answers name a payment this
+     * order tracks.
+     *
+     * <p>No verdict is implied: {@code PaymentCompleted}/{@code PaymentFailed} still arrive through
+     * the provider's webhook. But if the order was already cancelled while the checkout was being
+     * opened, the checkout must not stay payable — an {@code ExpirePayment} command goes out in the
+     * same transaction, and payment-service answers it with a completion (which is then refunded
+     * here) when the customer paid in the same moment.
+     *
+     * @param eventId id of the {@code PaymentAwaitingCustomer} event
+     * @param event   its payload
+     */
+    @Transactional
+    public void onPaymentAwaitingCustomer(UUID eventId, PaymentAwaitingCustomer event) {
+        if (!processedEvents.markProcessed(eventId, PAYMENT_CONSUMER)) {
+            return;
+        }
+        Order order = find(event.orderId(), "PaymentAwaitingCustomer");
+        if (order == null) {
+            return;
+        }
+        if (OrderStatus.STOCK_HELD.contains(order.getStatus())) {
+            order.rememberCheckout(event.paymentId(), event.checkoutUrl(), event.expiresAt());
+            orders.saveAndFlush(order);
+            log.info("Order {} is waiting for its customer to pay at the hosted checkout ({})",
+                    order.getId(), event.paymentId());
+            return;
+        }
+        if (order.getStatus() == OrderStatus.CANCELLED
+                || order.getStatus() == OrderStatus.CANCELLATION_PENDING
+                || order.getStatus() == OrderStatus.REJECTED) {
+            // The cancellation (or a rejection) overtook the checkout: the customer must not be
+            // able to pay for an order nobody will honour. Closing the session is the honest
+            // compensation — no money moved, so this is not a refund. The checkout's identity is
+            // remembered from this very event (no URL — there is nothing to hand the customer), so
+            // the expiry command is built even when the saga never got to store a link: dropping
+            // it here would leave a payable checkout standing against a cancelled order.
+            if (order.isCheckoutClosed()) {
+                // The close was queued when this checkout was first heard about (or when the order
+                // was given up on): this event is the same fact re-announced under a fresh event
+                // id, so it must not queue the close a second time.
+                ignored("PaymentAwaitingCustomer (checkout already closed)", order);
+                return;
+            }
+            order.rememberCheckout(event.paymentId(), null, event.expiresAt());
+            orders.saveAndFlush(order);
+            expireCheckout(order, "The order was already cancelled while its checkout was opened");
+            log.warn("Late PaymentAwaitingCustomer for {} order {}: compensating the open checkout",
+                    order.getStatus(), order.getId());
+            return;
+        }
+        // A checkout cannot precede the stock it is asked for (PENDING), and cannot outlive a
+        // completed payment (CONFIRMED): anything else is a foreign environment's replay.
+        ignored("PaymentAwaitingCustomer", order);
+    }
+
+    /**
      * The money is in: confirm the order and turn the reservation into a sale.
      *
      * <p>Unless the saga has already moved past this step — then the charge is real and the order
@@ -228,7 +289,8 @@ public class OrderSagaTransactions {
     }
 
     /**
-     * The charge was declined: compensate the reservation and cancel the order.
+     * The charge was declined (or the provider's session expired without a payment): compensate
+     * the reservation, close any checkout the customer was still holding, and cancel the order.
      *
      * @param eventId id of the {@code PaymentFailed} event
      * @param event   its payload
@@ -253,6 +315,8 @@ public class OrderSagaTransactions {
         // and the new status are the same commit, so the stock cannot stay held for a cancelled
         // order and the order cannot be cancelled without the stock going back.
         releaseStock(order, reason);
+        refundPayment(order, reason);
+        expireCheckout(order, reason);
         order.markCancelled(reason);
         orders.saveAndFlush(order);
         publishCancelled(order, reason);
@@ -351,11 +415,13 @@ public class OrderSagaTransactions {
                 // inventory-service (which then also remembers the intent, so a reservation raced
                 // in behind the release cannot survive either way). The other order of consumption
                 // — reserve first, release after — releases the held rows; both directions are
-                // leak-free. The payment: no answer has been recorded yet, so there is nothing to
-                // refund here; if the charge completes despite this, the late-payment compensation
-                // below refunds it on arrival.
+                // leak-free. The payment: nothing has been proven charged yet ({@code payment_id}
+                // is only set when a completion arrives), so there is nothing to refund here — an
+                // open checkout is closed, not refunded, and if the charge completes despite the
+                // cancellation, the late-payment compensation below refunds it on arrival.
                 releaseStock(order, CANCELLED_BY_CUSTOMER);
                 refundPayment(order, CANCELLED_BY_CUSTOMER);
+                expireCheckout(order, CANCELLED_BY_CUSTOMER);
                 order.markCancelled(CANCELLED_BY_CUSTOMER);
                 orders.saveAndFlush(order);
                 publishCancelled(order, CANCELLED_BY_CUSTOMER);
@@ -402,13 +468,16 @@ public class OrderSagaTransactions {
      * order timeout instead, which is unrelated to the retry interval and fires early whenever the
      * interval is the longer one.
      *
-     * @param orderId order to time out
-     * @param reason  what the customer is told
+     * @param orderId      order to time out
+     * @param reason       what the customer is told
+     * @param windowCutoff the freshness bound of the scan that selected the order: a scan considers
+     *                     an order stuck when its last transition is older than this instant (the
+     *                     step timeout) or when its checkout is past the provider's deadline
      * @return whether this call changed anything ({@code false} for an order that is gone, final,
-     *         or only waiting for its refund)
+     *         only waiting for its refund, or that progressed after the scan selected it)
      */
     @Transactional
-    public boolean timeOut(UUID orderId, String reason) {
+    public boolean timeOut(UUID orderId, String reason, OffsetDateTime windowCutoff) {
         Optional<Order> found = orders.findById(orderId);
         if (found.isEmpty()) {
             return false;
@@ -431,8 +500,23 @@ public class OrderSagaTransactions {
                     order.getId(), order.getPaymentId());
             return false;
         }
+        // Re-check the scan's grounds inside the cancelling transaction: a checkout answer or a
+        // payment may have arrived between the read-only scan and this transaction, and a stale
+        // scan result must never cancel a newly progressed order. The order is still a candidate
+        // when it is past the scan's freshness bound (the step/window timeout) or when its hosted
+        // checkout is past the provider's own deadline — whichever the sweep selected it by.
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        boolean pastWindow = order.getUpdatedAt().isBefore(windowCutoff);
+        boolean pastProviderDeadline = order.getCheckoutExpiresAt() != null
+                && order.getCheckoutExpiresAt().isBefore(now);
+        if (!pastWindow && !pastProviderDeadline) {
+            log.info("Order {} progressed after the sweep selected it (last transition {}): not cancelling",
+                    order.getId(), order.getUpdatedAt());
+            return false;
+        }
         releaseStock(order, reason);
         refundPayment(order, reason);
+        expireCheckout(order, reason);
         order.markCancelled(reason);
         orders.saveAndFlush(order);
         publishCancelled(order, reason);
@@ -563,15 +647,31 @@ public class OrderSagaTransactions {
      * @param order     order the event arrived for
      * @param paymentId payment named by the event
      * @param eventName for the log line
-     * @return {@code true} when the event id does not belong to the payment this order tracks and
-     *         the caller must stop. Payments are keyed {@code UNIQUE(order_id)} in payment-service;
-     *         a different id means a redelivered outbox row from a foreign environment or a bug.
+     * @return {@code true} when the event id does not belong to a payment this order tracks and the
+     *         caller must stop. Two ids are tracked: {@code payment_id}, a payment the order has
+     *         proof of, and {@code checkout_payment_id}, the payment behind its hosted checkout.
+     *         While the order is still waiting for the customer, the checkout identity is what a
+     *         later event must name; once a payment is proven, that identity is the authority.
+     *         Payments are keyed {@code UNIQUE(order_id)} in payment-service; a different id means a
+     *         redelivered outbox row from a foreign environment or a bug.
      */
     private boolean guardTrackedPayment(Order order, UUID paymentId, String eventName) {
-        if (order.getPaymentId() != null && paymentId != null
-                && !order.getPaymentId().equals(paymentId)) {
-            log.warn("Ignoring {} naming payment {} for order {} which tracks payment {}",
-                    eventName, paymentId, order.getId(), order.getPaymentId());
+        if (paymentId == null) {
+            return false;
+        }
+        UUID trackedPaid = order.getPaymentId();
+        if (trackedPaid != null) {
+            if (!trackedPaid.equals(paymentId)) {
+                log.warn("Ignoring {} naming payment {} for order {} which tracks payment {}",
+                        eventName, paymentId, order.getId(), trackedPaid);
+                return true;
+            }
+            return false;
+        }
+        UUID trackedCheckout = order.getCheckoutPaymentId();
+        if (trackedCheckout != null && !trackedCheckout.equals(paymentId)) {
+            log.warn("Ignoring {} naming payment {} for order {} which tracks checkout payment {}",
+                    eventName, paymentId, order.getId(), trackedCheckout);
             return true;
         }
         return false;
@@ -605,9 +705,12 @@ public class OrderSagaTransactions {
     }
 
     /**
-     * Requests the refund of the order's recorded payment, exactly once. Callers queue the command
-     * and flip {@code refund_status} in the same transaction via
-     * {@link Order#requestRefund()} — the flag is never ahead of the command.
+     * Requests the refund of the order's <em>proven</em> payment ({@code payment_id} is only set
+     * when a charge actually completed), exactly once. An awaiting checkout has no payment id, so
+     * cancelling an unpaid order never claims a refund it did not take — its checkout is closed by
+     * {@link #expireCheckout} instead. Callers queue the command and flip {@code refund_status} in
+     * the same transaction via {@link Order#requestRefund()} — the flag is never ahead of the
+     * command.
      *
      * @param order  order whose payment is being refunded
      * @param reason shown to the customer/document
@@ -639,6 +742,43 @@ public class OrderSagaTransactions {
         outbox.record(order.getId(), RefundPayment.class.getSimpleName(), Topics.PAYMENT_COMMANDS,
                 new RefundPayment(order.getId(), order.getPaymentId(), order.getTotalAmount(),
                         order.getCurrency(), reason));
+    }
+
+    /**
+     * Closes the hosted checkout of an order the saga has given up on, when the saga knows one was
+     * opened: the checkout's payment id ({@code checkout_payment_id}) is that knowledge — it is
+     * learned from {@code PaymentAwaitingCustomer} and does not depend on whether a URL was ever
+     * stored. The command carries it; payment-service decides what the close is worth — a session
+     * the customer paid in the same moment is answered with its completion, which arrives here as a
+     * late {@code PaymentCompleted} and is refunded. An order that never reached the hosted-checkout
+     * step (the simulated provider's charges never have one, and a rejection happens before any
+     * payment is asked) has no checkout identity, so this is quiet.
+     *
+     * <p>Why a separate command instead of reusing {@code RefundPayment}: refund means "money was
+     * taken, give it back", and its arrival flips {@code refund_status} bookkeeping. An abandoned
+     * session never took money — refunding nothing would leave that flag open forever and the
+     * recovery sweep would re-command it on every tick. Expiring is the honest compensation: no
+     * money moved, so the only owed thing is a closed session.
+     *
+     * @param order  order being compensated
+     * @param reason shown in payment-service's ledger
+     */
+    private void expireCheckout(Order order, String reason) {
+        UUID checkoutPaymentId = order.getCheckoutPaymentId();
+        if (checkoutPaymentId == null) {
+            // No hosted checkout is known to have been opened. Nothing to close.
+            return;
+        }
+        if (order.isCheckoutClosed()) {
+            // Its close has already been queued — by the cancellation or timeout that gave up on
+            // the order, or by the first awaiting event that arrived after it. The command is
+            // commanded once per checkout, never once per event about it.
+            return;
+        }
+        outbox.record(order.getId(), ExpirePayment.class.getSimpleName(), Topics.PAYMENT_COMMANDS,
+                new ExpirePayment(order.getId(), checkoutPaymentId, reason));
+        order.markCheckoutClosed();
+        log.info("Checkout of order {} is being closed ({})", order.getId(), checkoutPaymentId);
     }
 
     /** @param order an order being compensated with {@code releaseStock} */

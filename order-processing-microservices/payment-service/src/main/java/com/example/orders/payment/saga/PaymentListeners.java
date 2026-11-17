@@ -1,6 +1,7 @@
 package com.example.orders.payment.saga;
 
 import com.example.orders.common.events.EventEnvelope;
+import com.example.orders.common.events.ExpirePayment;
 import com.example.orders.common.events.ProcessPayment;
 import com.example.orders.common.events.RefundPayment;
 import com.example.orders.common.events.Topics;
@@ -41,6 +42,7 @@ class PaymentListeners {
         switch (envelope.payload()) {
             case ProcessPayment charge -> saga.processPayment(envelope.eventId(), charge);
             case RefundPayment refund -> saga.refundPayment(envelope.eventId(), refund);
+            case ExpirePayment expire -> saga.expirePayment(envelope.eventId(), expire);
             default -> log.debug("Ignoring {} on {}: not a payment command",
                     envelope.eventType(), record.topic());
         }

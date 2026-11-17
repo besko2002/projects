@@ -3,7 +3,9 @@ package com.example.orders.payment;
 import com.example.orders.common.events.EventEnvelope;
 import com.example.orders.common.events.EventHeaders;
 import com.example.orders.common.events.Topics;
+import com.example.orders.payment.domain.ChargeAttemptRepository;
 import com.example.orders.payment.domain.PaymentRepository;
+import com.example.orders.payment.domain.StripeWebhookEventRepository;
 import com.example.orders.support.idempotency.ProcessedEventRepository;
 import com.example.orders.support.outbox.OutboxRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -77,6 +79,13 @@ abstract class PaymentIntegrationTest {
     /** Ceiling the simulated gateway is configured with in these tests. */
     protected static final String DECLINE_ABOVE = "1000.00";
 
+    /**
+     * The Stripe webhook signing secret this test suite verifies deliveries against. It is a test
+     * fixture, not a leaked credential: {@code StripeWebhookService} accepts only deliveries whose
+     * {@code Stripe-Signature} was computed with exactly this string.
+     */
+    protected static final String WEBHOOK_SECRET = "whsec_payment_tests_local_fixture";
+
     @SuppressWarnings("resource")
     protected static final MockWebServer JWKS_STUB = new MockWebServer();
 
@@ -120,9 +129,14 @@ abstract class PaymentIntegrationTest {
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
         registry.add("AUTH_JWKS_URI", () -> "http://localhost:" + JWKS_STUB.getPort() + JWKS_PATH);
         registry.add("AUTH_JWT_ISSUER", () -> ISSUER);
+        // The simulated provider, selected explicitly: "simulated" is never a silent fallback in
+        // production, and the tests assert against a deterministic, network-free provider.
+        registry.add("PAYMENT_PROVIDER", () -> "simulated");
         // The gateway simulation, pinned so the tests assert against known thresholds.
         registry.add("PAYMENT_DECLINE_ABOVE", () -> DECLINE_ABOVE);
         registry.add("PAYMENT_FAILURE_RATE", () -> 0);
+        // The secret the webhook endpoint verifies deliveries with; the webhook tests sign with it.
+        registry.add("STRIPE_WEBHOOK_SECRET", () -> WEBHOOK_SECRET);
         // Keep the relay lively so a test does not wait half a second for every event.
         registry.add("OUTBOX_POLL_MS", () -> 250);
     }
@@ -142,12 +156,20 @@ abstract class PaymentIntegrationTest {
     @Autowired
     protected ProcessedEventRepository processedEvents;
 
+    @Autowired
+    protected StripeWebhookEventRepository stripeWebhookEvents;
+
+    @Autowired
+    protected ChargeAttemptRepository chargeAttempts;
+
     /** Every test starts from an empty store; the messaging tables go too. */
     @BeforeEach
     void resetDatabase() {
         outbox.deleteAllInBatch();
         processedEvents.deleteAllInBatch();
         payments.deleteAllInBatch();
+        stripeWebhookEvents.deleteAllInBatch();
+        chargeAttempts.deleteAllInBatch();
     }
 
     // ------------------------------------------------------------------ kafka helpers

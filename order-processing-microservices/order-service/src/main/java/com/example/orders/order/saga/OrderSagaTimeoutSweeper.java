@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,17 +54,23 @@ class OrderSagaTimeoutSweeper {
 
     private final OrderRepository orders;
     private final OrderSaga saga;
+    private static final PageRequest BATCH = PageRequest.of(0, 50);
+
     private final Duration timeout;
+    private final Duration paymentWindow;
     private final Duration refundRetryInterval;
 
     OrderSagaTimeoutSweeper(
             OrderRepository orders,
             OrderSaga saga,
             @Value("${orders.saga.timeout:PT2M}") Duration timeout,
+            @Value("${orders.saga.payment-window:PT35M}") Duration paymentWindow,
             @Value("${orders.saga.refund-retry-interval:PT30S}") Duration refundRetryInterval) {
         this.orders = orders;
         this.saga = saga;
         this.timeout = timeout;
+        // A customer at a hosted checkout is never given less time than any other step.
+        this.paymentWindow = paymentWindow.compareTo(timeout) < 0 ? timeout : paymentWindow;
         this.refundRetryInterval = refundRetryInterval;
     }
 
@@ -80,11 +87,20 @@ class OrderSagaTimeoutSweeper {
     }
 
     /**
-     * Cancels every order that has been stuck for longer than the timeout.
+     * Cancels every order that has been stuck for longer than the timeout, and every order whose
+     * hosted checkout is past the provider's own deadline.
      *
      * <p>Orders that are only waiting for an outstanding refund ({@code REQUESTED}) are not stuck
      * and are not candidates: re-commanding their refund is {@link #recoverOutstandingRefunds()}'s
      * job, paced by the retry interval, never by this timeout.
+     *
+     * <p>Two clocks cancel an order waiting at a hosted checkout. The configured payment window is
+     * the generous one; the provider's own session deadline ({@code checkout_expires_at}, carried
+     * by {@code PaymentAwaitingCustomer}) is the honest one — once Stripe itself refuses the
+     * payment, waiting longer only delays the customer's answer, and if the provider's expiry
+     * webhook was missed the deadline is what still gets the stock released. The re-check inside
+     * {@code timeOut} keeps a stale scan result from cancelling an order that progressed after the
+     * scan read it.
      *
      * <p>The scan is read-only and each cancellation is its own transaction, so a sweep never holds
      * locks across orders and a failure on one order does not roll back the others.
@@ -93,19 +109,42 @@ class OrderSagaTimeoutSweeper {
      */
     @Transactional(readOnly = true)
     public int cancelTimedOut() {
-        OffsetDateTime cutoff = OffsetDateTime.now(ZoneOffset.UTC).minus(timeout);
-        List<Order> stuck = orders.findTop50ByStatusInAndRefundStatusNotAndUpdatedAtBeforeOrderByUpdatedAtAsc(
-                OrderStatus.UNFINISHED, RefundStatus.REQUESTED, cutoff);
-        if (stuck.isEmpty()) {
-            return 0;
-        }
-        log.warn("Saga timeout sweep found {} order(s) with no progress since {}", stuck.size(), cutoff);
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        OffsetDateTime cutoff = now.minus(timeout);
         int cancelled = 0;
-        for (Order order : stuck) {
-            String reason = "The order was cancelled because step '%s' did not complete within %s"
-                    .formatted(order.getStatus(), timeout);
-            if (saga.timeOut(order.getId(), reason)) {
-                cancelled++;
+        List<Order> stuck = orders.findStuckExcludingAwaitingCustomer(
+                OrderStatus.UNFINISHED, RefundStatus.REQUESTED, OrderStatus.STOCK_HELD, cutoff, BATCH);
+        if (!stuck.isEmpty()) {
+            log.warn("Saga timeout sweep found {} order(s) with no progress since {}", stuck.size(), cutoff);
+            for (Order order : stuck) {
+                String reason = "The order was cancelled because step '%s' did not complete within %s"
+                        .formatted(order.getStatus(), timeout);
+                if (saga.timeOut(order.getId(), reason, cutoff)) {
+                    cancelled++;
+                }
+            }
+        }
+        // A customer holding a payment link gets the payment window, not the step timeout: the
+        // hosted checkout stays payable for at least 30 minutes, and cancelling while the customer
+        // is still typing their card would refund a payment they were entitled to make. The same
+        // scan also catches checkouts the provider itself has already closed (their deadline is
+        // older than any window would be), so a missed expiry webhook still gets compensated.
+        OffsetDateTime paymentCutoff = now.minus(paymentWindow);
+        List<Order> unpaid = orders.findAwaitingCustomerPastWindow(
+                OrderStatus.STOCK_HELD, RefundStatus.REQUESTED, paymentCutoff, now, BATCH);
+        if (!unpaid.isEmpty()) {
+            log.warn("Saga timeout sweep found {} unpaid checkout(s) past their window ({}) or the "
+                    + "provider's deadline", unpaid.size(), paymentWindow);
+            for (Order order : unpaid) {
+                String reason = order.getCheckoutExpiresAt() != null
+                        && order.getCheckoutExpiresAt().isBefore(now)
+                        ? "The order was cancelled because its payment page expired before payment "
+                                + "was completed"
+                        : "The order was cancelled because payment was not completed within %s"
+                                .formatted(paymentWindow);
+                if (saga.timeOut(order.getId(), reason, paymentCutoff)) {
+                    cancelled++;
+                }
             }
         }
         return cancelled;

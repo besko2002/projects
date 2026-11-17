@@ -98,6 +98,10 @@ orders:
     # compensation. Generous: the saga normally completes in milliseconds, and cancelling an order
     # that was merely slow is itself a failure.
     timeout: ${ORDER_SAGA_TIMEOUT:PT2M}
+    # How long a customer who was handed a hosted checkout (paymentUrl) may take to pay before the
+    # order is cancelled and the checkout closed. Must cover the provider's session lifetime
+    # (Stripe: PAYMENT_CHECKOUT_TTL, minimum 30 minutes); never shorter than the timeout above.
+    payment-window: ${ORDER_SAGA_PAYMENT_WINDOW:PT35M}
     sweep-interval-ms: ${ORDER_SAGA_SWEEP_MS:15000}
     timeout-sweeper-enabled: ${ORDER_SAGA_SWEEPER_ENABLED:true}
     # A refund whose command was never answered is re-commanded after this interval, measured

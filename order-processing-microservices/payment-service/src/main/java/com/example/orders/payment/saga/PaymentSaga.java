@@ -1,5 +1,6 @@
 package com.example.orders.payment.saga;
 
+import com.example.orders.common.events.ExpirePayment;
 import com.example.orders.common.events.ProcessPayment;
 import com.example.orders.common.events.RefundPayment;
 import com.example.orders.support.tx.OptimisticRetry;
@@ -46,6 +47,17 @@ public class PaymentSaga {
     public void refundPayment(UUID eventId, RefundPayment command) {
         OptimisticRetry.execute(maxAttempts, () -> {
             transactions.onRefundPayment(eventId, command);
+            return null;
+        });
+    }
+
+    /**
+     * @param eventId event id
+     * @param command the session-close command
+     */
+    public void expirePayment(UUID eventId, ExpirePayment command) {
+        OptimisticRetry.execute(maxAttempts, () -> {
+            transactions.onExpirePayment(eventId, command);
             return null;
         });
     }

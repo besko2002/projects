@@ -71,9 +71,57 @@ public class Order {
     @Column(name = "reservation_id")
     private UUID reservationId;
 
-    /** The payment payment-service recorded, learned from {@code PaymentCompleted}. */
+    /**
+     * The payment payment-service recorded <strong>and this order has proof of</strong>: either the
+     * charge completed while the order was live ({@code PaymentCompleted}), or a late completion
+     * arrived for an order the saga had already given up on (tracked for its refund). It is
+     * deliberately <em>not</em> written while the customer is merely holding a checkout link —
+     * "a checkout was opened" and "money was taken" are different facts (see
+     * {@link #checkoutPaymentId}).
+     */
     @Column(name = "payment_id")
     private UUID paymentId;
+
+    /**
+     * The payment behind the hosted checkout, learned from {@code PaymentAwaitingCustomer}: its id
+     * is the identity the {@code ExpirePayment} command is built from, so the checkout can be
+     * closed even when {@link #paymentUrl} was never stored (a cancellation that overtook the
+     * awaiting event must not drop the close). Distinct from {@link #paymentId} on purpose: an
+     * awaiting checkout is not money taken.
+     */
+    @Column(name = "checkout_payment_id")
+    private UUID checkoutPaymentId;
+
+    /**
+     * The hosted checkout page payment-service opened for this order, learned from
+     * {@code PaymentAwaitingCustomer}. Non-null means a checkout was (or may still be) open for a
+     * real provider: the API exposes it while the order waits for payment, and the saga uses the
+     * fact as its signal to have the session closed when the order is cancelled or times out —
+     * payment-service decides what the close is worth, and answers a completion it finds instead.
+     * Presentation only: the checkout's identity lives in {@link #checkoutPaymentId}, so the link
+     * is never re-shown after the saga gave up on the order.
+     */
+    @Column(name = "payment_url", length = 1000)
+    private String paymentUrl;
+
+    /**
+     * When the provider itself stops accepting the checkout's payment, carried by
+     * {@code PaymentAwaitingCustomer}. Advisory to the customer, but a hard fact for the saga: the
+     * timeout sweeper may cancel an order past this deadline even when the configured payment
+     * window would still keep it open, and must not cancel a valid checkout that is still payable.
+     */
+    @Column(name = "checkout_expires_at")
+    private OffsetDateTime checkoutExpiresAt;
+
+    /**
+     * When the saga gave up on the checkout and queued its {@code ExpirePayment} close, stamped
+     * once by {@link #markCheckoutClosed()}. The stamp is the close command's de-duplication mark —
+     * a re-announced {@code PaymentAwaitingCustomer} (fresh event id, same fact) finds it and
+     * queues nothing — and closing also retires the stored {@link #paymentUrl}: an order the saga
+     * has cancelled must not keep handing out a link it will never honour.
+     */
+    @Column(name = "checkout_closed_at")
+    private OffsetDateTime checkoutClosedAt;
 
     /**
      * The saga's own view of the refund for {@link #paymentId}. Kept separately from the status
@@ -236,6 +284,44 @@ public class Order {
     }
 
     /**
+     * Records a payment that is waiting for its customer, learned from
+     * {@code PaymentAwaitingCustomer}: the checkout's payment id (the identity the saga closes the
+     * session with, even for a cancelled order where no URL may be kept), the hosted page, and the
+     * provider's own deadline. Callers decide whether the checkout is still relevant; the order
+     * only remembers what payment-service reported. Deliberately does <em>not</em> touch
+     * {@code paymentId}: an awaiting checkout is not money taken.
+     *
+     * @param paymentId       the payment that is {@code AWAITING_CUSTOMER}
+     * @param paymentUrl      the hosted checkout page, or {@code null} when the saga must not
+     *                        expose one (the checkout of an already-cancelled order)
+     * @param checkoutExpires when the provider stops accepting the session's payment, may be
+     *                        {@code null} when unknown
+     */
+    public void rememberCheckout(UUID paymentId, String paymentUrl, OffsetDateTime checkoutExpires) {
+        this.checkoutPaymentId = paymentId;
+        this.paymentUrl = paymentUrl;
+        this.checkoutExpiresAt = checkoutExpires;
+    }
+
+    /**
+     * Marks the checkout closed after its {@code ExpirePayment} command has been queued: the close
+     * is commanded once per checkout — later awaiting events for the same checkout are then
+     * dropped instead of queueing the close again — and the stored link is retired, so a cancelled
+     * order never exposes a payable page. The checkout's identity is deliberately kept: it is what
+     * a re-announced awaiting event is recognised against.
+     */
+    public void markCheckoutClosed() {
+        this.checkoutClosedAt = OffsetDateTime.now(ZoneOffset.UTC);
+        this.paymentUrl = null;
+        this.checkoutExpiresAt = null;
+    }
+
+    /** @return whether the saga has already queued the close of this order's checkout */
+    public boolean isCheckoutClosed() {
+        return this.checkoutClosedAt != null;
+    }
+
+    /**
      * Marks a {@code RefundPayment} command as queued; callers queue the command in the same
      * transaction, so the flag can never claim a refund that is not actually on its way.
      *
@@ -327,6 +413,21 @@ public class Order {
 
     public UUID getPaymentId() {
         return paymentId;
+    }
+
+    /** @return the payment behind the hosted checkout, while one is known, else {@code null} */
+    public UUID getCheckoutPaymentId() {
+        return checkoutPaymentId;
+    }
+
+    /** @return the hosted checkout page while one is known, else {@code null} */
+    public String getPaymentUrl() {
+        return paymentUrl;
+    }
+
+    /** @return when the provider stops accepting the checkout's payment, or {@code null} */
+    public OffsetDateTime getCheckoutExpiresAt() {
+        return checkoutExpiresAt;
     }
 
     public RefundStatus getRefundStatus() {

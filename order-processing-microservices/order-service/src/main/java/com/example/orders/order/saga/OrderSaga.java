@@ -1,5 +1,6 @@
 package com.example.orders.order.saga;
 
+import com.example.orders.common.events.PaymentAwaitingCustomer;
 import com.example.orders.common.events.PaymentCompleted;
 import com.example.orders.common.events.PaymentFailed;
 import com.example.orders.common.events.PaymentRefunded;
@@ -68,6 +69,17 @@ public class OrderSaga {
      * @param eventId event id
      * @param event   the payload
      */
+    public void paymentAwaitingCustomer(UUID eventId, PaymentAwaitingCustomer event) {
+        OptimisticRetry.execute(maxAttempts, () -> {
+            transactions.onPaymentAwaitingCustomer(eventId, event);
+            return null;
+        });
+    }
+
+    /**
+     * @param eventId event id
+     * @param event   the payload
+     */
     public void paymentCompleted(UUID eventId, PaymentCompleted event) {
         OptimisticRetry.execute(maxAttempts, () -> {
             transactions.onPaymentCompleted(eventId, event);
@@ -108,12 +120,15 @@ public class OrderSaga {
     }
 
     /**
-     * @param orderId order the sweeper gave up on
-     * @param reason  what the customer is told
+     * @param orderId      order the sweeper gave up on
+     * @param reason       what the customer is told
+     * @param windowCutoff the freshness bound of the scan that selected the order; the transaction
+     *                     re-checks it so a stale scan result cannot cancel a progressed order
      * @return whether this call changed anything
      */
-    public boolean timeOut(UUID orderId, String reason) {
-        return OptimisticRetry.execute(maxAttempts, () -> transactions.timeOut(orderId, reason));
+    public boolean timeOut(UUID orderId, String reason, OffsetDateTime windowCutoff) {
+        return OptimisticRetry.execute(maxAttempts,
+                () -> transactions.timeOut(orderId, reason, windowCutoff));
     }
 
     /**

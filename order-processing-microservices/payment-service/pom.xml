@@ -12,7 +12,7 @@
 
     <artifactId>payment-service</artifactId>
     <name>payment-service</name>
-    <description>Simulated payments and refunds</description>
+    <description>Payments and refunds over Stripe Checkout (test mode) with a local simulated provider</description>
 
     <dependencies>
         <dependency>
@@ -71,6 +71,13 @@
         <dependency>
             <groupId>com.example.orders</groupId>
             <artifactId>service-support</artifactId>
+        </dependency>
+        <!-- The real provider SDK, used only by StripePaymentGateway (active when a sk_test_ key is
+             configured). The simulated provider and the tests never touch the network. -->
+        <dependency>
+            <groupId>com.stripe</groupId>
+            <artifactId>stripe-java</artifactId>
+            <version>29.2.0</version>
         </dependency>
 
         <dependency>

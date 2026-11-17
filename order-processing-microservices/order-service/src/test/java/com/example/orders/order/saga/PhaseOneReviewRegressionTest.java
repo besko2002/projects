@@ -24,6 +24,7 @@ import com.example.orders.support.outbox.OutboxWriter;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -136,8 +137,10 @@ class PhaseOneReviewRegressionTest {
         // The order timeout is not a refund clock: the order is waiting for its money, not stuck,
         // so a timeout leaves it — and its refund — exactly as they are, however often it fires.
         OffsetDateTime booked = order.getRefundRetryAt();
-        assertThat(transactions.timeOut(order.getId(), "refund timeout 0")).isFalse();
-        assertThat(transactions.timeOut(order.getId(), "refund timeout 0 again")).isFalse();
+        assertThat(transactions.timeOut(order.getId(), "refund timeout 0",
+                OffsetDateTime.now(ZoneOffset.UTC))).isFalse();
+        assertThat(transactions.timeOut(order.getId(), "refund timeout 0 again",
+                OffsetDateTime.now(ZoneOffset.UTC))).isFalse();
         verify(outbox, never()).record(any(UUID.class), eq(OUTBOX_REFUND), anyString(), any());
         assertThat(order.getRefundRetryAt()).isEqualTo(booked);
 

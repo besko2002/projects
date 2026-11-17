@@ -75,17 +75,34 @@ messaging:
 payments:
   # Attempts per command before an optimistic-locking conflict is given up on.
   max-attempts: ${PAYMENT_MAX_ATTEMPTS:3}
-
-# The simulated provider. Deterministic on purpose: the failure branch of the saga has to be
-# triggerable on demand, and a redelivered charge must reach the same verdict as the first one.
-# PAYMENT_DECLINE_ABOVE: every amount above this is declined (the "payment declined" demo).
-# PAYMENT_FAILURE_RATE: share of orders (0..1) declined regardless of amount, chosen from a hash of
-# the order id rather than at random.
-#
-# NOTE: this is a simulated provider — charging and refunding only flip rows in this service's
-# payments table. No real money moves, no real acquirer is called, and nothing here is correct for
-# real payments. A real provider would be an integration project of its own (credentials, PCI
-# scope, settlement semantics), not a configuration change.
+  # Which provider handles charges: "stripe" (or any sk_test_ key present) selects the real
+  # StripePaymentGateway; "simulated" selects the deterministic local one; with neither, the
+  # UnavailablePaymentGateway answers and every charge fails with a clear reason — a missing key is
+  # never a fake success. The simulated provider is never a fallback for Stripe.
+  provider: ${PAYMENT_PROVIDER:}
+  # Real Stripe, test mode only. STRIPE_SECRET_KEY must start with sk_test_ — a key that does not is
+  # refused outright (this application is test-mode only; there is no override).
+  # STRIPE_WEBHOOK_SECRET is the whsec_... of THIS service's webhook endpoint (locally: the secret
+  # printed by `stripe listen`); a wrong secret makes every webhook delivery a 400, so payment
+  # rows keep waiting for the customer and the saga's timeout compensates them.
+  secret-key: ${STRIPE_SECRET_KEY:}
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+  # Where the hosted checkout sends the customer back; the storefront passes its own return URLs,
+  # this is the fallback root for API-driven use.
+  storefront-base-url: ${STOREFRONT_BASE_URL:http://localhost:5179}
+  # How long a hosted checkout stays payable. The saga's own timeout stays the authority over
+  # abandoned checkouts; this only bounds what Stripe keeps open (its minimum is 30 minutes).
+  checkout-ttl: ${PAYMENT_CHECKOUT_TTL:PT30M}
+  # The simulated provider. Deterministic on purpose: the failure branch of the saga has to be
+  # triggerable on demand, and a redelivered charge must reach the same verdict as the first one.
+  # PAYMENT_DECLINE_ABOVE: every amount above this is declined (the "payment declined" demo).
+  # PAYMENT_FAILURE_RATE: share of orders (0..1) declined regardless of amount, chosen from a hash
+  # of the order id rather than at random. These knobs do nothing for the Stripe provider.
+  decline-above: ${PAYMENT_DECLINE_ABOVE:1000.00}
+  failure-rate: ${PAYMENT_FAILURE_RATE:0}
+  # Currency every checkout is asked in (Stripe needs minor units; conversion uses ISO fraction
+  # digits, so this must be a real ISO 4217 code).
+  currency: ${STRIPE_CURRENCY:EUR}
 
 management:
   tracing:

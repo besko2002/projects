@@ -20,7 +20,8 @@ public final class Topics {
 
     /**
      * Published by payment-service: {@link PaymentCompleted}, {@link PaymentFailed},
-     * {@link PaymentRefunded}.
+     * {@link PaymentRefunded} and — only when a real provider needs the customer to pay —
+     * {@link PaymentAwaitingCustomer}, which carries the hosted checkout URL.
      */
     public static final String PAYMENT_EVENTS = "payment.events";
 
@@ -31,8 +32,9 @@ public final class Topics {
     public static final String INVENTORY_COMMANDS = "inventory.commands";
 
     /**
-     * Commands consumed by payment-service: {@link ProcessPayment} to charge, and
-     * {@link RefundPayment} as compensation.
+     * Commands consumed by payment-service: {@link ProcessPayment} to charge,
+     * {@link RefundPayment} as compensation for a taken payment, and {@link ExpirePayment} to
+     * close a hosted checkout the customer abandoned after the saga gave up on the order.
      */
     public static final String PAYMENT_COMMANDS = "payment.commands";
 

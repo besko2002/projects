@@ -9,6 +9,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /** Orders by id, by owner and — for administrators — across all owners. */
 public interface OrderRepository extends JpaRepository<Order, UUID> {
@@ -86,6 +88,53 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
      */
     List<Order> findTop50ByStatusInAndRefundStatusNotAndUpdatedAtBeforeOrderByUpdatedAtAsc(
             Collection<OrderStatus> statuses, RefundStatus excludedRefund, OffsetDateTime cutoff);
+
+    /**
+     * The saga-timeout sweeper's query for orders that are <em>not</em> waiting at a hosted
+     * checkout: like {@link #findTop50ByStatusInAndRefundStatusNotAndUpdatedAtBeforeOrderByUpdatedAtAsc},
+     * but an order whose customer has a payment link open (stock held, {@code payment_url} set) is
+     * left out — it is not stuck, it is waiting for a person, and has its own, longer window
+     * ({@link #findAwaitingCustomerPastWindow}). Excluded in the query so such rows cannot fill the
+     * capped batch and starve genuinely stuck orders.
+     */
+    @Query("""
+            select o from OrderAggregate o
+             where o.status in :statuses
+               and o.refundStatus <> :excludedRefund
+               and o.updatedAt < :cutoff
+               and not (o.paymentUrl is not null and o.status in :awaitingStates)
+             order by o.updatedAt asc
+            """)
+    List<Order> findStuckExcludingAwaitingCustomer(
+            @Param("statuses") Collection<OrderStatus> statuses,
+            @Param("excludedRefund") RefundStatus excludedRefund,
+            @Param("awaitingStates") Collection<OrderStatus> awaitingStates,
+            @Param("cutoff") OffsetDateTime cutoff,
+            Pageable limit);
+
+    /**
+     * Orders whose customer was handed a hosted checkout ({@code payment_url} set, stock still
+     * held) and did not finish paying in time. Two clocks make "in time": the configured payment
+     * window, measured from the checkout's arrival (the last transition), and the provider's own
+     * session deadline ({@code checkout_expires_at}) — a checkout Stripe itself no longer accepts
+     * is compensated even when the window would keep waiting. Orders waiting for a refund are
+     * excluded as above.
+     */
+    @Query("""
+            select o from OrderAggregate o
+             where o.status in :awaitingStates
+               and o.paymentUrl is not null
+               and o.refundStatus <> :excludedRefund
+               and (o.updatedAt < :cutoff
+                    or (o.checkoutExpiresAt is not null and o.checkoutExpiresAt < :now))
+             order by o.updatedAt asc
+            """)
+    List<Order> findAwaitingCustomerPastWindow(
+            @Param("awaitingStates") Collection<OrderStatus> awaitingStates,
+            @Param("excludedRefund") RefundStatus excludedRefund,
+            @Param("cutoff") OffsetDateTime cutoff,
+            @Param("now") OffsetDateTime now,
+            Pageable limit);
 
     /**
      * The refund-recovery sweep's query: orders the saga still owes a refund for, from a state in

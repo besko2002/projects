@@ -6,8 +6,6 @@ import java.util.Locale;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
 
 /**
  * Stands in for a real payment provider — <strong>simulated money only</strong>.
@@ -15,9 +13,8 @@ import org.springframework.stereotype.Component;
  * <p>Nothing here moves real funds, talks to a real acquirer, or is correct for real money: the
  * charge writes an {@code AUTHORIZED} row in this service's own database and the refund flips it,
  * and that ledger is the whole "bank". Documentation, configuration examples and the README label
- * every charging/refunding behaviour as simulated — an integration with a real payment provider
- * does not exist and is deliberately out of scope (a real one would need PCI-relevant credentials,
- * liability and settlement semantics this project does not model).
+ * every charging/refunding behaviour as simulated — the real provider is
+ * {@link StripePaymentGateway}, which this class deliberately does not resemble beyond the port.
  *
  * <p>It is deliberately <strong>deterministic</strong>: the same order always gets the same answer.
  * A saga is only testable if its failure branch can be triggered on purpose, and a gateway that
@@ -33,9 +30,13 @@ import org.springframework.stereotype.Component;
  *       regardless of amount, for demonstrating compensation under "normal" traffic. The choice is
  *       made from a hash of the order id, not from a random number, so it stays stable per order.</li>
  * </ul>
+ *
+ * <p>Selected only by an explicit {@code PAYMENT_PROVIDER=simulated} — the automated tests and
+ * anyone who wants the deterministic demo loop. It is never a fallback for a missing Stripe key:
+ * with no keys the {@link UnavailablePaymentGateway} answers, so an unconfigured deployment cannot
+ * drift into faking successful payments.
  */
-@Component
-public class SimulatedPaymentGateway {
+public class SimulatedPaymentGateway implements PaymentGateway {
 
     /** Reason reported when the amount is above the configured ceiling. */
     public static final String DECLINED_AMOUNT = "Payment declined: amount %s %s exceeds the limit of %s";
@@ -52,30 +53,51 @@ public class SimulatedPaymentGateway {
      * @param declineAbove amounts strictly greater than this are declined
      * @param failureRate  share of orders declined regardless of amount, {@code 0}..{@code 1}
      */
-    SimulatedPaymentGateway(
-            @Value("${PAYMENT_DECLINE_ABOVE:1000.00}") BigDecimal declineAbove,
-            @Value("${PAYMENT_FAILURE_RATE:0}") double failureRate) {
+    public SimulatedPaymentGateway(BigDecimal declineAbove, double failureRate) {
         this.declineAbove = declineAbove;
         this.failureRate = failureRate;
     }
 
+    @Override
+    public String provider() {
+        return "SIMULATED";
+    }
+
     /**
-     * @param orderId  order being charged; the only source of randomness, so the answer is stable
-     * @param amount   amount to charge
-     * @param currency ISO 4217 code
+     * @param request the charge; the order id is the only source of randomness, so the answer is
+     *                stable per order no matter how often the call is repeated
      * @return the provider's answer
      */
-    public GatewayDecision charge(UUID orderId, BigDecimal amount, String currency) {
+    @Override
+    public ChargeOutcome charge(ChargeRequest request) {
+        UUID orderId = request.orderId();
+        BigDecimal amount = request.amount();
+        String currency = request.currency();
         if (amount == null || amount.compareTo(declineAbove) > 0) {
             String reason = DECLINED_AMOUNT.formatted(amount, currency, declineAbove.toPlainString());
             log.info("Simulated gateway declined order {}: {}", orderId, reason);
-            return GatewayDecision.declined(reason);
+            return new ChargeOutcome.Declined(reason);
         }
         if (failsByRate(orderId)) {
             log.info("Simulated gateway declined order {} by failure rate {}", orderId, failureRate);
-            return GatewayDecision.declined(DECLINED_RATE);
+            return new ChargeOutcome.Declined(DECLINED_RATE);
         }
-        return GatewayDecision.approved(providerReference(orderId));
+        return new ChargeOutcome.Approved(providerReference(orderId));
+    }
+
+    @Override
+    public SessionOutcome expireSession(String checkoutSessionId) {
+        // The simulator never opens a hosted session (its charges are instant), so there is
+        // nothing to close; guarded anyway so a future call path cannot NPE.
+        log.info("Simulated gateway has no checkout session {} to expire", checkoutSessionId);
+        return new SessionOutcome.Expired();
+    }
+
+    @Override
+    public RefundOutcome refund(RefundRequest request) {
+        // The refund is the row flip in this service's own database; the provider port has no
+        // side to call. The caller records the flip in the saga transaction.
+        return new RefundOutcome.Refunded(null);
     }
 
     /**

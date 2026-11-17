@@ -110,7 +110,8 @@ class OrderRefundRetryTimingTest extends OrderIntegrationTest {
         assertThat(NOT_DUE_AGE).isGreaterThan(timeout).isLessThan(refundRetryInterval);
         assertThat(DUE_AGE).isGreaterThan(refundRetryInterval);
         assertThat(STUCK_AGE).isGreaterThan(timeout).isLessThan(NOT_DUE_AGE);
-        sweeper = new OrderSagaTimeoutSweeper(orders, saga, timeout, refundRetryInterval);
+        // No hosted checkouts in these fixtures, so the payment window plays no part here.
+        sweeper = new OrderSagaTimeoutSweeper(orders, saga, timeout, timeout, refundRetryInterval);
     }
 
     // ------------------------------------------------------------------ before the retry is due
@@ -131,8 +132,8 @@ class OrderRefundRetryTimingTest extends OrderIntegrationTest {
         assertThat(sweeper.recoverOutstandingRefunds()).as("refund recovery scan").isZero();
         // The timeout itself, called directly (what the scan used to do per candidate), is no retry
         // driver either — for a waiting order or a cancelled one.
-        assertThat(saga.timeOut(waiting, "Test: direct timeout")).isFalse();
-        assertThat(saga.timeOut(cancelled, "Test: direct timeout")).isFalse();
+        assertThat(saga.timeOut(waiting, "Test: direct timeout", OffsetDateTime.now(ZoneOffset.UTC))).isFalse();
+        assertThat(saga.timeOut(cancelled, "Test: direct timeout", OffsetDateTime.now(ZoneOffset.UTC))).isFalse();
         // And again, in the other order, as repeated ticks do.
         assertThat(sweeper.recoverOutstandingRefunds()).isZero();
         assertThat(sweeper.cancelTimedOut()).isZero();
@@ -247,7 +248,7 @@ class OrderRefundRetryTimingTest extends OrderIntegrationTest {
         age(DUE_AGE, waiting, cancelled);
         assertThat(sweeper.cancelTimedOut()).isZero();
         assertThat(sweeper.recoverOutstandingRefunds()).isZero();
-        assertThat(saga.timeOut(waiting, "Test: late timeout")).isFalse();
+        assertThat(saga.timeOut(waiting, "Test: late timeout", OffsetDateTime.now(ZoneOffset.UTC))).isFalse();
         assertThat(saga.recoverOutstandingRefund(
                 cancelled, "Test: late recovery", now().plus(refundRetryInterval))).isFalse();
 

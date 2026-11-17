@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.example.orders.payment.domain.Payment;
+import com.example.orders.payment.domain.PaymentProvider;
 import java.math.BigDecimal;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -85,6 +86,7 @@ class PaymentApiTest extends PaymentIntegrationTest {
      */
     private Payment givenAuthorizedPayment(UUID customerId, String amount) {
         return payments.saveAndFlush(Payment.authorized(
-                UUID.randomUUID(), customerId, new BigDecimal(amount), "EUR", "SIM-TESTREF"));
+                UUID.randomUUID(), customerId, new BigDecimal(amount), "EUR",
+                PaymentProvider.SIMULATED, "SIM-TESTREF"));
     }
 }

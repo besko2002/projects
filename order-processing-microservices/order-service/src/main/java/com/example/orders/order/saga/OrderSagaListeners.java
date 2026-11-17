@@ -1,6 +1,7 @@
 package com.example.orders.order.saga;
 
 import com.example.orders.common.events.EventEnvelope;
+import com.example.orders.common.events.PaymentAwaitingCustomer;
 import com.example.orders.common.events.PaymentCompleted;
 import com.example.orders.common.events.PaymentFailed;
 import com.example.orders.common.events.PaymentRefunded;
@@ -68,6 +69,7 @@ class OrderSagaListeners {
     void onPaymentEvent(ConsumerRecord<String, String> record) {
         EventEnvelope<Object> envelope = reader.read(record);
         switch (envelope.payload()) {
+            case PaymentAwaitingCustomer awaiting -> saga.paymentAwaitingCustomer(envelope.eventId(), awaiting);
             case PaymentCompleted completed -> saga.paymentCompleted(envelope.eventId(), completed);
             case PaymentFailed failed -> saga.paymentFailed(envelope.eventId(), failed);
             case PaymentRefunded refunded -> saga.paymentRefunded(envelope.eventId(), refunded);
