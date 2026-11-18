@@ -26,6 +26,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -404,7 +405,8 @@ class PaymentSagaTest extends PaymentIntegrationTest {
         UUID orderId = UUID.randomUUID();
         UUID winnerEventId = UUID.randomUUID();
         UUID winnerPaymentId = UUID.randomUUID();
-        OffsetDateTime winnerExpiry = OffsetDateTime.now(ZoneOffset.UTC).plus(Duration.ofMinutes(30));
+        OffsetDateTime winnerExpiry = OffsetDateTime.now(ZoneOffset.UTC)
+                .plus(Duration.ofMinutes(30)).truncatedTo(ChronoUnit.MICROS);
         chargeAttempts.saveAndFlush(
                 ChargeAttempt.first(orderId, winnerEventId, winnerPaymentId, winnerExpiry));
 

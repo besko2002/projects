@@ -84,7 +84,9 @@ public class ChargeAttempt {
         this.orderId = orderId;
         this.eventId = eventId;
         this.paymentId = paymentId;
-        this.expiresAt = expiresAt;
+        // PostgreSQL TIMESTAMPTZ stores microsecond precision. Normalize before the first provider
+        // call so the first request and any later read-after-retry use byte-for-byte equal expiry.
+        this.expiresAt = expiresAt.withNano((expiresAt.getNano() / 1_000) * 1_000);
         this.attempts = 0;
         this.createdAt = OffsetDateTime.now(ZoneOffset.UTC);
         this.updatedAt = this.createdAt;
