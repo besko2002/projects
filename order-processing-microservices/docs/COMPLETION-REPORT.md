@@ -153,7 +153,7 @@ Outline Store is implemented in `storefront/` (React 19 + React Router 7 + Vite 
 
 ## Phase E — full verification and evidence (M4)
 
-**Status: PARTIAL — live Stripe TEST-mode walkthrough ran to hosted Checkout; order placed, payment attempt captured, one idempotent POST replay confirmed (StrictMode double-POST produces same order); decline-then-retry webhook (`payment_intent.payment_failed`) timed out after 45 s before `failureReason` appeared; confirmation, UI cancellation and refund were not reached. Evidence captured includes screenshots of catalog, product detail, cart, order‑waiting state, and Stripe Checkout page (375 / 1440 px).**
+**Status: PARTIAL — live Stripe TEST-mode walkthrough reached hosted Checkout; order placed, one idempotent POST replay confirmed (StrictMode), Stripe session captured (EUR, card, livemode:false); confirmation, UI cancellation and real refund were not reached due to decline‑then‑retry webhook timing out before `failureReason` appeared. Evidence captured includes screenshots of catalog, product detail, cart, order‑waiting state, and Stripe Checkout page (375 / 1440 px).**
 
 ### Screenshots (git‑ignored, `e2e-logs/phase-e/`)
 - 01‑catalog – 375 / 1440 px
@@ -170,7 +170,7 @@ Outline Store is implemented in `storefront/` (React 19 + React Router 7 + Vite 
 - Stripe decline not reached within Phase E run; limits documented below
 
 ### Limits / known gaps
-- Decline‑then‑retry on the same Stripe session could not be proven within the 45 s webhook‑wait window; the `payment_intent.payment_failed` event may be delivered later or require a different card‑decline scenario (the test card `4000000000000002` produced a Stripe inline error that did not generate a server‑side `failureReason` before the polling deadline).
+- Decline‑then‑retry on the same Stripe session could not be proven within the webhook‑wait window; the `payment_intent.payment_failed` event may be delivered later or require a different card‑decline scenario (the test card `4000000000000002` produced a Stripe inline error that did not generate a server‑side `failureReason` before the polling deadline).
 - Full confirmation‑then‑cancellation‑then‑refund walkthrough was not exercised because the run aborted on the webhook wait.
 - Screenshots are local‑only evidence; checkout‑URL or session‑id never appear in them.
 - No synthetic data was injected; all product/catalog data came from the live gateway.
@@ -197,12 +197,6 @@ Outline Store is implemented in `storefront/` (React 19 + React Router 7 + Vite 
 ## Phase G — final review, commits, shutdown (M5)
 
 **Status: NOT_STARTED**
-
-## Evidence log
-
-## Phase G — final review, commits, shutdown (M5)
-
-**Status: NOT STARTED**
 
 ## Evidence log
 

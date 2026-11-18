@@ -20,14 +20,18 @@ export function signInPath(returnPath: string): string {
  * The payment URL comes from our own backend, but it is still only followed when it is a
  * trusted absolute URL — a `javascript:` or `data:` value must never reach `location.assign`.
  *
- * Stripe Checkout is HTTPS. Plain HTTP is tolerated only for a loopback host, which keeps local
- * development stacks usable without ever sending a checkout session over the network in clear.
+ * Stripe Checkout is HTTPS, hosted on `checkout.stripe.com`. Plain HTTP is tolerated only for a
+ * loopback host, which keeps local development stacks usable without ever sending a checkout
+ * session over the network in clear.
  */
 export function isSafePaymentUrl(url: string | null | undefined): url is string {
   if (!url) return false;
   try {
     const parsed = new URL(url);
-    if (parsed.protocol === 'https:') return true;
+    if (parsed.protocol === 'https:') {
+      // Only Stripe's official checkout domain is trusted over HTTPS.
+      return parsed.hostname === 'checkout.stripe.com';
+    }
     if (parsed.protocol === 'http:') {
       return (
         parsed.hostname === 'localhost' ||
