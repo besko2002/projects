@@ -33,25 +33,38 @@ jobs:
       - name: Build and run all tests
         run: ./mvnw -B verify
 
-      - name: Frontend build, lint, tests and audit
-        runs-on: ubuntu-latest
-        defaults:
-          run:
-            working-directory: order-processing-microservices/storefront
-        steps:
-        - name: Install dependencies
-          run: npm ci
-        - name: Build
-          run: npm run build
-        - name: Lint
-          run: npm run lint
-        - name: Tests
-          run: npm test -- --run
-        - name: Audit
-          run: npm audit --omit=dev
-
       - name: Test report
         if: always()
         run: |
           for f in */target/surefire-reports/*.txt; do grep -h "Tests run" "$f"; done | \
             awk -F'[ ,]+' '{t+=$3; f+=$5; e+=$7} END {print "Tests: "t", failures: "f", errors: "e}'
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: order-processing-microservices/storefront
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: order-processing-microservices/storefront/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm test -- --run
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=low
