@@ -153,11 +153,52 @@ Outline Store is implemented in `storefront/` (React 19 + React Router 7 + Vite 
 
 ## Phase E — full verification and evidence (M4)
 
-**Status: NOT STARTED**
+**Status: PARTIAL — live Stripe TEST-mode walkthrough ran to hosted Checkout; order placed, payment attempt captured, one idempotent POST replay confirmed (StrictMode double-POST produces same order); decline-then-retry webhook (`payment_intent.payment_failed`) timed out after 45 s before `failureReason` appeared; confirmation, UI cancellation and refund were not reached. Evidence captured includes screenshots of catalog, product detail, cart, order‑waiting state, and Stripe Checkout page (375 / 1440 px).**
+
+### Screenshots (git‑ignored, `e2e-logs/phase-e/`)
+- 01‑catalog – 375 / 1440 px
+- 02‑product – 375 / 1440 px
+- 03‑cart – 375 / 1440 px
+- 04‑order‑waiting – 375 / 1440 px (order detail loaded while Stripe page was open)
+- 05‑stripe‑checkout – 375 / 1440 px (hosted Stripe form, card fields present)
+
+### Evidence JSON (`/private/var/folders/.../T/op/phase-e-ui.json`)
+- registration, catalog, product, cart, checkout attempt with orderId, 2 POSTs same key/payload (StrictMode replay), distinct orders = 1, one key, one payload
+- product: Demo Headset Pro, price €199.99, stock before 99
+- checkout: orderId, posts = 2, distinctOrders = 1, one idempotency key captured, attempt persisted before Stripe redirect
+- Stripe session open (EUR, amount_total 19999, currency eur, payment_method_types [card]), providerRef is the Stripe PaymentIntent
+- Stripe decline not reached within Phase E run; limits documented below
+
+### Limits / known gaps
+- Decline‑then‑retry on the same Stripe session could not be proven within the 45 s webhook‑wait window; the `payment_intent.payment_failed` event may be delivered later or require a different card‑decline scenario (the test card `4000000000000002` produced a Stripe inline error that did not generate a server‑side `failureReason` before the polling deadline).
+- Full confirmation‑then‑cancellation‑then‑refund walkthrough was not exercised because the run aborted on the webhook wait.
+- Screenshots are local‑only evidence; checkout‑URL or session‑id never appear in them.
+- No synthetic data was injected; all product/catalog data came from the live gateway.
 
 ## Phase F — documentation and CI (M4b)
 
-**Status: NOT STARTED**
+**Status: IN_PROGRESS**
+
+### Checks
+- `npm ci` PASS (exit 0; blocked esbuild/fsevents install scripts don't affect esbuild binary)
+- `npm run build` (`tsc --noEmit && vite build`) PASS — 65 modules transformed, dist built
+- `npm run lint` PASS — 0 errors, 0 warnings
+- `npm test -- --run` → **17 files, 90 tests, 0 failures**
+- `npm audit --omit=dev`: **0 vulnerabilities**; full audit **11 dev‑only high** (picomatch/tinyglobby/fdir through Vite 6 and Vitest 4, and the `@typescript-eslint` chain) — `npm audit fix --dry-run` leaves them; `--force` major upgrades were not applied; no production dependency is affected
+- Live smoke through the dev origin `http://localhost:5179` (Vite proxy → gateway `:8080`, real stack): index/main/CSS **200**; `GET /api/products?page=0&size=3` **200** (9 products, 3 pages); login **200** (USER, Bearer); `GET /api/orders/me` **200**; product detail **200** with exactly the six `ProductResponse` fields; unauthenticated `GET /api/orders/me` **401**
+- Checkout contract live: `POST /api/orders` with a generated `Idempotency-Key` → **201**; identical replay → **200** with the **same** order id; the order reached `PAYMENT_PENDING` with a payment URL; `POST /api/orders/{id}/cancel` → **200** `CANCELLED`, `refundStatus=NONE`, payment URL retired
+- Browser checks (headless Google Chrome 156.0.8078.74, Node v26.7.0) at 375/768/1024/1440: **20 loaded screen/viewport combinations** (catalog, product detail, cart with a line, my orders with the cancelled smoke order, order detail with its real timeline, sign‑in, register, product‑not‑found, 404 route) — **0 px horizontal page overflow**, no page errors. Keyboard tab order starts at the brand link → nav → form controls, and every stop has a visible **3 px solid `#2a4bff`** focus outline. Found and fixed during this check: the visually‑hidden `<th>` labels inside tables were absolutely positioned against the page, widening the document at 375 px; `.table-scroll` is now `position: relative`, so wide tables scroll inside their own container. Screenshots and the measurement report are in `e2e-logs/storefront-responsive/` (git‑ignored)
+
+### Limits
+- Screenshots are local‑only evidence and not committed
+- No `npm audit fix --force` major upgrades; dev‑only highs accepted with disposition
+- Wide cart/orders tables intentionally scroll inside `.table-scroll` at 375 px; page itself must not overflow
+
+## Phase G — final review, commits, shutdown (M5)
+
+**Status: NOT_STARTED**
+
+## Evidence log
 
 ## Phase G — final review, commits, shutdown (M5)
 
