@@ -108,7 +108,48 @@ Stack: `docker compose up -d --force-recreate payment-service` after webhook-sec
 
 ## Phase D — storefront (M3)
 
-**Status: NOT STARTED**
+**Status: DONE**
+
+Outline Store is implemented in `storefront/` (React 19 + React Router 7 + Vite 6, TypeScript). The app is server-truth only: prices, stock, totals, order state and payment/refund state all come from the gateway; the cart stores product ids and integer quantities, never prices. There are no mock-data paths, invented images or invented backend fields; unsupported product imagery uses the deliberate `.product-card__placeholder` block.
+
+### Implementation
+
+- App shell: `src/main.tsx`, `src/App.tsx`, `src/index.css` — flat white / 2px outline design system, accent `#2a4bff`, spacing scale, reduced-motion block, skip link, semantic landmarks and route guards.
+- API: typed clients in `src/api/*` against the real gateway contract (`PageResponse`, `OrderResponse`, `PaymentResponse`), one `request()` with bearer token, 401 handler and `ApiException`; wire types are copied field-for-field from the backend records.
+- State: `AuthProvider` restores the stored token through `/api/auth/me` and exposes an identity epoch; `CartProvider` persists `{productId, quantity}`, clamps quantities, validates stored JSON and clears cart plus checkout attempt on identity change.
+- Pages: catalog (server paging and `q` search), product detail (server data, stock, quantity validation, add to cart), cart (live revalidation of price/stock, per-line totals, checkout blocked while invalid), checkout, payment success/cancel, my orders, order detail, sign-in/register and not found.
+- Checkout recovery: `src/lib/idempotency.ts` persists `{key, payload, orderId}`; every retry/reload reuses the same key and a payload sorted into a stable order until the attempt is resolved (confirmed, cancelled or definitively refused) or the customer explicitly resumes it. A changed cart never silently mints a second order: Resume / View order / Back to cart are offered.
+- Polling: `src/lib/poll.ts` bounded exponential backoff (12 attempts) with unmount cancellation and an explicit timeout result; checkout and success pages render a timeout with Check again, never a fabricated paid state.
+- Payment redirect safety: only `https:` (or `http:` loopback) URLs are followed; `javascript:`, `data:` and external hosts are rejected (`src/utils/url.ts`, `browser.redirect`).
+- Success/cancel: success ignores Stripe's `session_id` and trusts only `GET /api/orders/{id}`; cancel shows actual order state, offers Pay now only while payable and Cancel order only on explicit action; refund requested and refund settled are distinct.
+- Order detail: server totals/currency, status/reason, payment status, cancellation/refund progress and the real event log from `GET /api/orders/{id}/events` (labelled "Current progress only" when the log is empty).
+
+### Tests (every mandatory §8 bullet covered)
+
+`cd storefront && npm test -- --run` → **17 files, 90 tests, 0 failures**:
+
+- money minor-unit arithmetic, safe return/redirect URLs, palette contrast and CSS/code palette parity
+- API client (401 clears token, error mapping), bounded polling with fake timers, idempotency persistence, cart arithmetic/clamping/persistence/identity change/corrupt storage
+- checkout: single POST with a persisted key, same key+payload on retry, reload recovery without a second POST, changed-cart gate and explicit resume, safe redirect, unsafe URL refusal, 409 out-of-stock refusal, cancelled-order reason, timeout
+- payment success: missing attempt, CONFIRMED (cart cleared), CANCELLED with reason, timeout then Check again, unreadable order
+- payment cancel: Pay now, explicit cancel with refund requested, CONFIRMED despite the redirect, refund settled, missing attempt
+- catalog and orders pagination plus loading/error/empty states; order detail refund states, real timeline and cancel; cart stock revalidation; sign-in/register validation, duplicate-submit guards and safe return paths; `ProtectedRoute` guard.
+
+### Gate evidence (18 Nov 2026)
+
+- `npm run build` (`tsc --noEmit && vite build`): **PASS** — 65 modules transformed, dist built.
+- `npm run lint`: **PASS** — 0 errors, 0 warnings.
+- `npm test -- --run`: **17 files / 90 tests / 0 failures**, no skips and no `.only`.
+- `npm audit --omit=dev`: **0 vulnerabilities**. Full `npm audit`: **11 high, all dev-only** (`picomatch`/`tinyglobby`/`fdir` through Vite 6 and Vitest 4, and the `@typescript-eslint` chain); `npm audit fix --dry-run` leaves them, so only `--force` major upgrades would change them — no force fix was applied, and no production dependency is affected.
+- Live smoke through the dev origin `http://localhost:5179` (Vite proxy → gateway `:8080`, real stack): index/main/CSS **200**; `GET /api/products?page=0&size=3` **200** (9 products, 3 pages); login **200** (USER, Bearer); `GET /api/orders/me` **200**; product detail **200** with exactly the six `ProductResponse` fields; unauthenticated `GET /api/orders/me` **401**.
+- Checkout contract live: `POST /api/orders` with a generated `Idempotency-Key` → **201**; identical replay → **200** with the **same** order id; the order reached `PAYMENT_PENDING` with a payment URL; `POST /api/orders/{id}/cancel` → **200** `CANCELLED`, `refundStatus=NONE`, payment URL retired.
+- Browser checks (headless Google Chrome 156.0.8078.74, Node v26.7.0) at 375/768/1024/1440: **20 loaded screen/viewport combinations** (catalog, product detail, cart with a line, my orders with the cancelled smoke order, order detail with its real timeline, sign-in, register, product-not-found, 404 route) — **0 px horizontal page overflow**, no page errors. Keyboard tab order starts at the brand link → nav → form controls, and every stop has a visible **3px solid `#2a4bff`** focus outline. Found and fixed during this check: the visually-hidden `<th>` labels inside tables were absolutely positioned against the page, widening the document at 375px; `.table-scroll` is now `position: relative`, so wide tables scroll inside their own container. Screenshots and the measurement report are in `e2e-logs/storefront-responsive/` (git-ignored).
+
+### Limits
+
+- Screenshots are local-only evidence and are not committed. Checkout/success screens were not captured mid-flow because checkout immediately opens a real TEST-mode Stripe session; the real payment/refund walkthrough belongs to Phase E and will cover those states without exposing checkout URLs.
+- Long-name and error states were exercised with real data (longest live product name: "Demo Limited Edition Speaker"); no synthetic data was injected.
+- Wide cart/orders tables scroll horizontally inside `.table-scroll` by design at 375px; the page itself does not overflow.
 
 ## Phase E — full verification and evidence (M4)
 
