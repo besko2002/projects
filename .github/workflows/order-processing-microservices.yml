@@ -33,6 +33,23 @@ jobs:
       - name: Build and run all tests
         run: ./mvnw -B verify
 
+      - name: Frontend build, lint, tests and audit
+        runs-on: ubuntu-latest
+        defaults:
+          run:
+            working-directory: order-processing-microservices/storefront
+        steps:
+        - name: Install dependencies
+          run: npm ci
+        - name: Build
+          run: npm run build
+        - name: Lint
+          run: npm run lint
+        - name: Tests
+          run: npm test -- --run
+        - name: Audit
+          run: npm audit --omit=dev
+
       - name: Test report
         if: always()
         run: |
