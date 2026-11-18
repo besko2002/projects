@@ -56,12 +56,14 @@ export function CartProvider({ children }: { children: ReactNode }) {
   // A different (or departed) account must not inherit the previous customer's purchase state:
   // both the cart and an unresolved checkout attempt belong to the visit, not to the browser.
 useEffect(() => {
-    // The cart and attempt belong to the signed-in user/visit, not the browser.
-    // When the user changes (sign-in/sign-out), always clear them so that one
-    // customer's unresolved attempt never leaks into another customer's session.
-    setLines([]);
-    clearAttempt();
-  }, [identityEpoch, getToken()]);
+    // Only clear cart/attempt when identityEpoch actually changes (i.e. user truly changed).
+    // This prevents clearing on re-mounts within the same session.
+    const hasIdentityChanged = identityEpoch > 0;
+    if (hasIdentityChanged) {
+      setLines([]);
+      clearAttempt();
+    }
+  }, [identityEpoch]);
 
   const addLine = useCallback((productId: string, quantity: number) => {
     if (!productId || !Number.isFinite(quantity)) return;
