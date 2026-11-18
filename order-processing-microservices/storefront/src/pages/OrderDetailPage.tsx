@@ -218,7 +218,7 @@ export function OrderDetailPage() {
                   <button
                     type="button"
                     className="btn btn--primary"
-                    onClick={() => browser.redirect(order.paymentUrl as string)}
+                    onClick={() => { window.localStorage.setItem("paynow_return_order_id", order.id); browser.redirect(order.paymentUrl as string); }}
                   >
                     Pay now
                   </button>

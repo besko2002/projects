@@ -85,6 +85,26 @@ export function clearAttempt(): void {
  * decision.
  */
 export function beginAttempt(items: OrderItemRequest[]): CheckoutAttempt {
+  // Preserve any in-memory attempt across storage-denied mounts (R5).
+  // If there is already an attempt key in localStorage, reuse it instead of
+  // generating a fresh UUID, which would create a duplicate order risk when
+  // localStorage writes are blocked (private browsing, quota, policy).
+  const existingKey = typeof window !== "undefined"
+
+    ? window.localStorage.getItem(ATTEMPT_KEY)
+
+    : null;
+  if (existingKey) {
+    const parsed = JSON.parse(existingKey);
+    if (parsed && parsed.key && isCreateOrderRequest(parsed.payload)) {
+      return {
+        key: parsed.key,
+        payload: parsed.payload,
+        orderId: typeof parsed.orderId === "string" ? parsed.orderId : null,
+        startedAt: typeof parsed.startedAt === "string" ? parsed.startedAt : new Date().toISOString(),
+      };
+    }
+  }
   const attempt: CheckoutAttempt = {
     key: crypto.randomUUID(),
     payload: { items: items.map((item) => ({ ...item })) },

@@ -19,6 +19,7 @@ export interface PollOptions<T> {
   /** Delay before the second attempt; doubles per attempt up to maxDelayMs. */
   baseDelayMs?: number;
   maxDelayMs?: number;
+  totalDeadlineMs?: number;
   /** Set `cancelled` on unmount so the loop stops and its timers are abandoned. */
   signal?: { cancelled: boolean };
   /** Called with every successful response, e.g. to update the screen while waiting. */
